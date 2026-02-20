@@ -1,0 +1,538 @@
+
+import React, { useState, useEffect, useMemo } from 'react';
+import { Ticket, TicketStatus, Technician, Activity } from '../types';
+import { ChevronLeft, MapPin, Navigation, CheckCircle2, Camera, LogOut, Clock, AlertTriangle, Play, Check, Smartphone, X, Calendar } from 'lucide-react';
+import { INPUT_STYLES } from '../constants';
+import { MyJobTaskView } from './MyJobTaskView';
+
+interface MobileTechPortalProps {
+  tickets: Ticket[];
+  activities?: Activity[]; // Now accepts activities
+  currentTechId: string;
+  onUpdateStatus: (ticketId: string, status: TicketStatus) => void;
+  onUpdateActivity?: (activity: Activity) => void;
+  isStandalone?: boolean;
+  onLogout?: () => void;
+  // Handler for custom actions
+  onUpdateTicket?: (ticket: Ticket) => void; 
+}
+
+const MobileTechPortal: React.FC<MobileTechPortalProps> = ({ 
+    tickets, 
+    activities = [], 
+    currentTechId, 
+    onUpdateStatus, 
+    onUpdateActivity,
+    isStandalone = false, 
+    onLogout,
+    onUpdateTicket // Optional if needed, but we can reuse onUpdateStatus for basic status changes
+}) => {
+  // --- Responsive Check ---
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [completionStep, setCompletionStep] = useState(false);
+  const [completionNotes, setCompletionNotes] = useState('');
+  const [reportingDelayActivity, setReportingDelayActivity] = useState<Activity | null>(null);
+
+  // Carry Forward State
+  const [isCarryForwardOpen, setIsCarryForwardOpen] = useState(false);
+  const [carryForwardRemark, setCarryForwardRemark] = useState('');
+  const [carryForwardDate, setCarryForwardDate] = useState('');
+  const [carryForwardTime, setCarryForwardTime] = useState('');
+  const [showToast, setShowToast] = useState(false);
+
+  // Combine Tickets and Activities into a single "Job" concept for display
+  // Prioritize Delayed Jobs
+  // Tickets: Show ONLY tickets assigned to currentTechId
+  // Exclude: RESOLVED, CANCELLED
+  const myJobs = [
+      ...tickets
+        .filter(t => t.assignedTechId === currentTechId && t.status !== TicketStatus.CANCELLED)
+        .map(t => ({
+          type: 'ticket' as const, 
+          data: t, 
+          date: t.appointmentTime || t.createdAt, 
+          priority: t.priority, 
+          delayed: false
+      })),
+      ...activities
+        .filter(a => a.leadTechId === currentTechId && a.status !== 'DONE' && a.status !== 'CANCELLED')
+        .map(a => ({
+          type: 'activity' as const, 
+          data: a, 
+          date: a.plannedDate, 
+          priority: a.priority, 
+          delayed: (a.escalationLevel || 0) > 0
+      }))
+  ].sort((a, b) => {
+      // Sort by Delayed first, then Date
+      if (a.delayed && !b.delayed) return -1;
+      if (!a.delayed && b.delayed) return 1;
+      return new Date(a.date).getTime() - new Date(b.date).getTime();
+  });
+
+  const activeJobItem = myJobs.find(j => j.data.id === selectedJobId);
+  const activeJob = activeJobItem?.data;
+
+  const handleBack = () => {
+      if (completionStep) setCompletionStep(false);
+      else setSelectedJobId(null);
+  };
+
+  const handleStatusUpdate = (ticketId: string, status: TicketStatus, note?: string) => {
+      if (onUpdateTicket) {
+          const t = tickets.find(x => x.id === ticketId);
+          if (t) {
+              const updates: any = { ...t, status, updatedAt: new Date().toISOString() };
+              if (status === TicketStatus.RESOLVED && note) {
+                  updates.completionNote = note;
+                  updates.completedAt = new Date().toISOString();
+              }
+              onUpdateTicket(updates);
+          }
+      } else {
+          onUpdateStatus(ticketId, status);
+      }
+  };
+
+  const handleComplete = () => {
+      if (activeJobItem?.type === 'ticket') {
+          // Keep existing behavior for tickets
+          onUpdateStatus(activeJobItem.data.id, TicketStatus.RESOLVED);
+      } else if (activeJobItem?.type === 'activity' && onUpdateActivity) {
+          const a = activeJobItem.data as Activity;
+          const note = completionNotes.trim();
+          onUpdateActivity({
+              ...a,
+              status: 'DONE',
+              remarks: note ? (a.remarks ? a.remarks + '\n' + note : note) : a.remarks,
+              updatedAt: new Date().toISOString()
+          });
+      }
+      setCompletionNotes('');
+      setCompletionStep(false);
+      setSelectedJobId(null);
+  };
+
+  const handleStart = () => {
+      if (activeJobItem?.type === 'ticket') {
+          onUpdateStatus(activeJobItem.data.id, TicketStatus.IN_PROGRESS);
+          // In a fuller implementation, we would also set startedAt here via an enhanced update handler
+      } else if (activeJobItem?.type === 'activity' && onUpdateActivity) {
+          onUpdateActivity({ ...activeJobItem.data as Activity, status: 'IN_PROGRESS' });
+      }
+  };
+
+  const handleCarryForwardClick = () => {
+      const now = new Date();
+      // Round to next 15 mins
+      const m = now.getMinutes();
+      const rem = m % 15;
+      const add = 15 - rem;
+      now.setMinutes(m + add);
+      
+      // If we pushed past 5pm, maybe default to next day 9am? (Optional DX)
+      if (now.getHours() >= 17) {
+          now.setDate(now.getDate() + 1);
+          now.setHours(9, 0, 0, 0);
+      }
+
+      const yyyy = now.getFullYear();
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const dd = String(now.getDate()).padStart(2, '0');
+      
+      const hh = String(now.getHours()).padStart(2, '0');
+      const min = String(now.getMinutes()).padStart(2, '0');
+
+      setCarryForwardDate(`${yyyy}-${mm}-${dd}`);
+      setCarryForwardTime(`${hh}:${min}`);
+      setCarryForwardRemark('');
+      setIsCarryForwardOpen(true);
+  };
+
+  const handleConfirmCarryForward = () => {
+      if (!carryForwardRemark.trim() || !carryForwardDate || !carryForwardTime) return;
+
+      const nextIso = new Date(`${carryForwardDate}T${carryForwardTime}`).toISOString();
+
+      if (activeJobItem?.type === 'ticket') {
+          const t = activeJobItem.data as Ticket;
+          if (onUpdateTicket) {
+              onUpdateTicket({
+                  ...t,
+                  status: TicketStatus.CARRY_FORWARD,
+                  carryForwardNote: carryForwardRemark,
+                  nextPlannedAt: nextIso,
+                  updatedAt: new Date().toISOString()
+              });
+          } else {
+              onUpdateStatus(t.id, TicketStatus.CARRY_FORWARD);
+          }
+      } else if (activeJobItem?.type === 'activity') {
+          const a = activeJobItem.data as Activity;
+          if (onUpdateActivity) {
+              onUpdateActivity({
+                  ...a,
+                  status: 'PLANNED', // Re-queue
+                  plannedDate: nextIso,
+                  remarks: carryForwardRemark ? (a.remarks ? a.remarks + '\n' + carryForwardRemark : carryForwardRemark) : a.remarks,
+                  updatedAt: new Date().toISOString()
+              });
+          }
+      }
+
+      setIsCarryForwardOpen(false);
+      setSelectedJobId(null);
+      setShowToast(true);
+      setTimeout(() => setShowToast(false), 3000);
+  };
+
+  const handleDelaySubmit = (e: React.FormEvent<HTMLFormElement>) => {
+      e.preventDefault();
+      if (!onUpdateActivity || !reportingDelayActivity) return;
+      const formData = new FormData(e.currentTarget);
+      const reason = formData.get('reason') as string;
+      const custom = formData.get('customReason') as string;
+
+      onUpdateActivity({
+          ...reportingDelayActivity,
+          delayReason: reason === 'Other' ? custom : reason
+      });
+      setReportingDelayActivity(null);
+  };
+
+  const timeOptions = useMemo(() => {
+      const opts = [];
+      for (let h = 0; h < 24; h++) {
+          for (let m = 0; m < 60; m += 15) {
+              opts.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+          }
+      }
+      return opts;
+  }, []);
+
+  if (!isMobile) {
+      return (
+          <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+              <div className="max-w-md w-full bg-white rounded-xl border border-slate-200 shadow-sm p-8 text-center">
+                  <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-400">
+                      <Smartphone size={32} />
+                  </div>
+                  <h2 className="text-2xl font-semibold text-gray-900 mb-3">
+                        Oops! This View Works Best on Mobile 📱</h2>
+                  <p className="text-gray-600 leading-relaxed">
+                    The Tech Portal is built for field mobility.
+                    <br />
+                    Please access this module from a mobile device for the best experience.
+                </p>
+              </div>
+          </div>
+      );
+  }
+
+  // Simplified container for mobile use (takes full height/width)
+  const containerClasses = "w-full h-full bg-slate-900 flex flex-col";
+
+  return (
+    <div className="h-full w-full bg-slate-900">
+        {/* Phone Container / Full Screen Container */}
+        <div className={containerClasses}>
+            
+            {/* Header */}
+            <div className="bg-slate-900 text-white p-4 flex items-center justify-between z-10 shrink-0">
+                {selectedJobId ? (
+                    <button onClick={handleBack}><ChevronLeft size={24} /></button>
+                ) : (
+                    <div className="flex items-center gap-3">
+                        <h1 className="font-bold text-lg">My Jobs</h1>
+                        {onLogout && <button onClick={onLogout}><LogOut size={16} className="text-slate-600 hover:text-white"/></button>}
+                    </div>
+                )}
+                <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"/>
+                    <span className="text-xs font-medium text-emerald-400">ONLINE</span>
+                </div>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 bg-slate-50 rounded-t-[2rem] overflow-hidden relative">
+                
+                {/* Job List */}
+                {!selectedJobId && (
+                    <div className="p-4 space-y-4 pt-6 h-full overflow-y-auto no-scrollbar">
+                        <p className="text-sm text-slate-500 font-medium px-2">TODAY'S SCHEDULE</p>
+                        {myJobs.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center h-48 text-slate-400">
+                                <CheckCircle2 size={48} className="mb-2"/>
+                                <p>All clear for now!</p>
+                            </div>
+                        ) : (
+                            myJobs.map(item => {
+                                const isActivity = item.type === 'activity';
+                                const job = item.data as any; // Unified access
+                                
+                                if (!isActivity) {
+                                    return <MyJobTaskView key={job.id} ticket={job} onUpdateStatus={handleStatusUpdate} />;
+                                }
+
+                                const delayed = item.delayed;
+                                const isStarted = job.status === 'IN_PROGRESS';
+
+                                return (
+                                    <div 
+                                        key={job.id} 
+                                        className={`bg-white p-4 rounded-2xl shadow-sm border active:scale-95 transition-transform relative overflow-hidden ${
+                                            delayed ? 'border-red-400 ring-2 ring-red-100' : 'border-slate-100'
+                                        }`}
+                                        onClick={() => setSelectedJobId(job.id)}
+                                    >
+                                        {/* Delay Badge */}
+                                        {delayed && (
+                                            <div className="absolute top-0 right-0 bg-red-500 text-white text-[10px] font-bold px-3 py-1 rounded-bl-xl shadow-sm z-10">
+                                                DELAYED
+                                            </div>
+                                        )}
+                                        
+                                        {/* In Progress Badge */}
+                                        {isStarted && (
+                                            <div className="absolute top-0 right-0 bg-blue-500 text-white text-[10px] font-bold px-3 py-1 rounded-bl-xl shadow-sm z-10">
+                                                STARTED
+                                            </div>
+                                        )}
+
+                                        <div className="flex justify-between mb-2">
+                                            <span className="bg-blue-50 text-blue-700 text-[10px] font-bold px-2 py-1 rounded-full">
+                                                {new Date(item.date).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+                                            </span>
+                                            <span className="text-xs font-bold text-slate-400 mr-12">{job.reference}</span>
+                                        </div>
+                                        
+                                        <div>
+                                            <h3 className="font-bold text-slate-800 text-lg mb-1">{job.type}</h3>
+                                            <div className="flex items-center gap-1 text-slate-500 text-sm mb-3">
+                                                <MapPin size={14} />
+                                                <span>{job.houseNumber || 'Location URL'}</span>
+                                            </div>
+                                            <div className="bg-slate-50 p-2 rounded-lg text-xs text-slate-600 line-clamp-2">
+                                                {job.description}
+                                            </div>
+                                        </div>
+
+                                        {/* Report Delay Button (For Activities) */}
+                                        {delayed && (
+                                            <button 
+                                                onClick={(e) => { e.stopPropagation(); setReportingDelayActivity(job as Activity); }}
+                                                className="mt-3 w-full py-2 bg-red-50 text-red-600 text-xs font-bold rounded-lg border border-red-100 flex items-center justify-center gap-1"
+                                            >
+                                                <AlertTriangle size={12} /> Report Reason
+                                            </button>
+                                        )}
+                                    </div>
+                                );
+                            })
+                        )}
+                    </div>
+                )}
+
+                {/* Job Detail (Only for Activities now, as Tickets use MyJobTaskView) */}
+                {activeJob && activeJobItem?.type === 'activity' && !completionStep && (
+                    <div className="flex flex-col h-full">
+                        {/* Map Placeholder */}
+                        <div className="h-48 bg-emerald-50 w-full flex items-center justify-center text-emerald-200">
+                             <MapPin size={48} />
+                        </div>
+                        <div className="flex-1 bg-white -mt-6 rounded-t-3xl p-6 shadow-lg flex flex-col">
+                            <h2 className="text-2xl font-bold text-slate-800 mb-1">
+                                {(activeJob as Activity).type}
+                            </h2>
+                            <p className="text-slate-500 mb-6">
+                                {(activeJob as Activity).description}
+                            </p>
+
+                            <div className="grid grid-cols-2 gap-4 mb-6">
+                                <button className="flex flex-col items-center justify-center p-3 bg-slate-50 rounded-xl text-slate-600">
+                                    <Navigation size={24} className="mb-1" />
+                                    <span className="text-xs font-semibold">Navigate</span>
+                                </button>
+                                <button className="flex flex-col items-center justify-center p-3 bg-slate-50 rounded-xl text-slate-600">
+                                    <Camera size={24} className="mb-1" />
+                                    <span className="text-xs font-semibold">Photos</span>
+                                </button>
+                            </div>
+
+                            <div className="mt-auto space-y-3">
+                                {((activeJob as Activity).status === 'PLANNED') && (
+                                    <button 
+                                        onClick={handleStart}
+                                        className="w-full py-4 rounded-xl bg-slate-900 text-white font-bold shadow-lg active:bg-slate-800 flex items-center justify-center gap-2"
+                                    >
+                                        <Play size={20} className="fill-current"/> Start Work
+                                    </button>
+                                )}
+                                
+                                {((activeJob as Activity).status === 'IN_PROGRESS') && (
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <button 
+                                            onClick={handleCarryForwardClick}
+                                            className="w-full py-4 rounded-xl bg-slate-200 text-slate-600 font-bold active:bg-slate-300"
+                                        >
+                                            Carry Forward
+                                        </button>
+                                        <button 
+                                            onClick={() => setCompletionStep(true)}
+                                            className="w-full py-4 rounded-xl bg-emerald-500 text-white font-bold shadow-lg active:bg-emerald-600 flex items-center justify-center gap-2"
+                                        >
+                                            <Check size={20} /> Complete
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Completion Screen (Only for Activities) */}
+                {activeJob && completionStep && (
+                    <div className="p-6 pt-10 h-full bg-white flex flex-col">
+                         <h2 className="text-2xl font-bold text-slate-900 mb-6">Job Completion</h2>
+                         
+                         <div className="space-y-4 flex-1">
+                             <div>
+                                 <label className="block text-sm font-medium text-slate-700 mb-1">Resolution Notes</label>
+                                 <textarea className={INPUT_STYLES} placeholder="What did you fix?" rows={4} value={completionNotes} onChange={(e) => setCompletionNotes(e.target.value)} />
+                             </div>
+                             
+                             <div className="flex items-center gap-3 p-4 border border-slate-200 rounded-xl bg-slate-50">
+                                 <div className="w-10 h-10 bg-slate-200 rounded-lg flex items-center justify-center">
+                                     <Camera size={20} className="text-slate-500" />
+                                 </div>
+                                 <span className="text-sm font-medium text-slate-600">Add Proof of Work</span>
+                             </div>
+                         </div>
+
+                         <div className="flex gap-3">
+                             <button onClick={() => setCompletionStep(false)} className="flex-1 py-4 text-slate-500 font-bold">Back</button>
+                             <button 
+                                onClick={handleComplete}
+                                className="flex-[2] py-4 rounded-xl bg-emerald-600 text-white font-bold shadow-xl active:bg-emerald-700"
+                             >
+                                 Submit & Close
+                             </button>
+                         </div>
+                    </div>
+                )}
+
+                {/* Report Delay Modal */}
+                {reportingDelayActivity && (
+                    <div className="absolute inset-0 z-50 bg-black/50 flex items-end">
+                        <div className="bg-white w-full rounded-t-3xl p-6 animate-in slide-in-from-bottom duration-300">
+                            <h3 className="text-lg font-bold text-slate-900 mb-4">Report Delay Reason</h3>
+                            <p className="text-xs text-slate-500 mb-4">Why is this job delayed?</p>
+                            <form onSubmit={handleDelaySubmit} className="space-y-3">
+                                {['Stuck in traffic', 'Previous job overrun', 'Client not available', 'Waiting for materials', 'Need support', 'Other'].map(r => (
+                                    <label key={r} className="flex items-center gap-3 p-3 border rounded-xl has-[:checked]:bg-blue-50 has-[:checked]:border-blue-200">
+                                        <input type="radio" name="reason" value={r} className="text-blue-600" required />
+                                        <span className="text-sm font-medium text-slate-700">{r}</span>
+                                    </label>
+                                ))}
+                                <input name="customReason" placeholder="If Other, please specify..." className={INPUT_STYLES} />
+                                
+                                <div className="flex gap-3 mt-4">
+                                    <button type="button" onClick={() => setReportingDelayActivity(null)} className="flex-1 py-3 text-slate-500 font-bold">Cancel</button>
+                                    <button type="submit" className="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold shadow-lg">Report</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                )}
+
+                {/* Carry Forward Modal */}
+                {isCarryForwardOpen && (
+                    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end justify-center" onClick={() => setIsCarryForwardOpen(false)}>
+                        <div className="bg-white w-full max-w-md rounded-t-[2rem] p-6 shadow-2xl animate-in slide-in-from-bottom duration-300" onClick={e => e.stopPropagation()}>
+                            <div className="flex justify-between items-center mb-6">
+                                <h3 className="text-xl font-bold text-slate-900">Carry Forward</h3>
+                                <button onClick={() => setIsCarryForwardOpen(false)} className="p-2 bg-slate-100 rounded-full text-slate-500">
+                                    <X size={20} />
+                                </button>
+                            </div>
+                            
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Reason / Remark <span className="text-red-500">*</span></label>
+                                    <textarea 
+                                        value={carryForwardRemark}
+                                        onChange={e => setCarryForwardRemark(e.target.value)}
+                                        className={INPUT_STYLES}
+                                        rows={3}
+                                        placeholder="Why is the job being carried forward?"
+                                    />
+                                </div>
+                                
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Next Date <span className="text-red-500">*</span></label>
+                                        <input 
+                                            type="date"
+                                            value={carryForwardDate}
+                                            onChange={e => setCarryForwardDate(e.target.value)}
+                                            className={INPUT_STYLES}
+                                            min={new Date().toISOString().split('T')[0]}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Next Time <span className="text-red-500">*</span></label>
+                                        <select 
+                                            value={carryForwardTime}
+                                            onChange={e => setCarryForwardTime(e.target.value)}
+                                            className={INPUT_STYLES}
+                                        >
+                                            {timeOptions.map(t => (
+                                                <option key={t} value={t}>{t}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                </div>
+                                
+                                <div className="pt-4 flex gap-3">
+                                    <button 
+                                        onClick={() => setIsCarryForwardOpen(false)}
+                                        className="flex-1 py-3.5 rounded-xl font-bold text-slate-500 bg-slate-100"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button 
+                                        onClick={handleConfirmCarryForward}
+                                        disabled={!carryForwardRemark.trim() || !carryForwardDate || !carryForwardTime}
+                                        className="flex-[2] py-3.5 rounded-xl font-bold text-white bg-slate-900 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        Confirm
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Toast Notification */}
+                {showToast && (
+                    <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[60] bg-slate-900 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-2 animate-in fade-in slide-in-from-top-4 duration-300">
+                        <CheckCircle2 size={18} className="text-emerald-400" />
+                        <span className="font-bold text-sm">Job Carried Forward</span>
+                    </div>
+                )}
+
+            </div>
+        </div>
+    </div>
+  );
+};
+
+export default MobileTechPortal;

@@ -1,0 +1,801 @@
+
+import React, { useMemo, useState, useEffect, useRef, useLayoutEffect } from 'react';
+import { Team, Site, Technician, Activity, Ticket, TicketStatus, Priority, Customer } from '../types';
+import { 
+  MapPin, Clock, Truck, ShieldAlert, 
+  Activity as ActivityIcon, Calendar, ZoomIn, ZoomOut,
+  CheckCircle2, AlertCircle, History, Ticket as TicketIcon, 
+  Zap, ArrowRight, X, ExternalLink, Users, ChevronRight, User, Phone
+} from 'lucide-react';
+
+interface OperationsDashboardProps {
+  teams: Team[];
+  sites: Site[];
+  technicians: Technician[];
+  activities: Activity[];
+  tickets: Ticket[];
+  customers: Customer[];
+  onUpdateActivity?: (activity: Activity) => void;
+  onNavigate?: (type: 'ticket' | 'activity', id: string) => void;
+  readOnly?: boolean;
+}
+
+// Define a union type for the selected item in the drawer
+type DrawerItem = { type: 'ticket', data: Ticket } | { type: 'activity', data: Activity };
+
+const OperationsDashboard: React.FC<OperationsDashboardProps> = ({ 
+    teams, 
+    sites, 
+    technicians,
+    activities,
+    tickets,
+    customers,
+    onUpdateActivity,
+    onNavigate,
+    readOnly = false
+}) => {
+  const [selectedItem, setSelectedItem] = useState<DrawerItem | null>(null);
+  const [currentTime, setCurrentTime] = useState(new Date());
+  
+  // Timeline Configuration
+  const [zoomLevel, setZoomLevel] = useState(140); // Pixels per hour
+  
+  // Constants for Fixed Timeline (00:00 - 24:00)
+  const TIMELINE_START = 0;
+  const TIMELINE_END = 24;
+  const TOTAL_HOURS = TIMELINE_END - TIMELINE_START; 
+  const totalGridWidth = TOTAL_HOURS * zoomLevel;
+  const LEFT_COL_WIDTH = 280;
+
+  // Filters
+  const [bodyScrollLeft, setBodyScrollLeft] = useState(0);
+
+
+  // Refs for Scroll Sync
+  const leftColRef = useRef<HTMLDivElement>(null);
+  const headerScrollRef = useRef<HTMLDivElement>(null);
+  const bodyScrollRef = useRef<HTMLDivElement>(null);
+  const hasAutoScrolled = useRef(false);
+
+  // Update clock every minute
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 60000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Auto-scroll to current time on open
+  useEffect(() => {
+    const el = bodyScrollRef.current;
+    if (!el) return;
+
+    const now = new Date();
+    const nowX =
+      ((now.getHours() - TIMELINE_START) + now.getMinutes() / 60) * zoomLevel;
+
+    const target = Math.max(0, nowX - el.clientWidth * 0.4);
+    el.scrollLeft = target;
+  }, []);
+
+  // --- Scroll Synchronization ---
+  const handleBodyScroll = () => {
+      if (bodyScrollRef.current) {
+          const { scrollLeft, scrollTop } = bodyScrollRef.current;
+          setBodyScrollLeft(scrollLeft);
+          
+          // Sync Header Horizontally
+          if (headerScrollRef.current) {
+              headerScrollRef.current.scrollLeft = scrollLeft;
+          }
+          
+          // Sync Left Column Vertically
+          if (leftColRef.current) {
+              leftColRef.current.scrollTop = scrollTop;
+          }
+      }
+  };
+
+  const handleHeaderScroll = () => {
+      if (headerScrollRef.current && bodyScrollRef.current) {
+          bodyScrollRef.current.scrollLeft = headerScrollRef.current.scrollLeft;
+      }
+  };
+
+  const handleLeftWheel = (e: React.WheelEvent) => {
+      if (bodyScrollRef.current) {
+          bodyScrollRef.current.scrollTop += e.deltaY;
+      }
+  };
+
+  // --- Helpers ---
+
+  const normalizeStatus = (status: string | undefined) => {
+      if (!status) return '';
+      // Convert "In Progress", "INPROGRESS", "in_progress" -> "IN_PROGRESS"
+      return status.toUpperCase().replace(/\s/g, '_').replace('INPROGRESS', 'IN_PROGRESS');
+  };
+
+  const getTechWorkload = (techId: string) => {
+      const today = new Date().toDateString();
+      const todaysActs = activities.filter(a => 
+          a.leadTechId === techId && 
+          new Date(a.plannedDate).toDateString() === today &&
+          a.status !== 'CANCELLED'
+      );
+      return todaysActs.reduce((acc, curr) => acc + curr.durationHours, 0);
+  };
+
+  const getNowX = () => {
+      const hours = currentTime.getHours() + currentTime.getMinutes() / 60;
+      if (hours < TIMELINE_START) return 0;
+      if (hours > TIMELINE_END) return totalGridWidth;
+      return (hours - TIMELINE_START) * zoomLevel;
+  };
+
+  // Auto-scroll to NOW on initial load
+  useLayoutEffect(() => {
+      if (bodyScrollRef.current && !hasAutoScrolled.current && totalGridWidth > 0) {
+          const nowX = getNowX();
+          // Only scroll if we are within the timeline range
+          if (nowX > 0 && nowX < totalGridWidth) {
+              const containerWidth = bodyScrollRef.current.clientWidth;
+              const targetScroll = Math.max(0, nowX - (containerWidth / 2));
+              bodyScrollRef.current.scrollLeft = targetScroll;
+          }
+          hasAutoScrolled.current = true;
+      }
+  }, [totalGridWidth, zoomLevel]);
+
+  const getPositionStyle = (dateStr: string, durationHours: number = 2) => {
+  let date = new Date(dateStr);
+  if (isNaN(date.getTime())) date = new Date();
+
+  const startHours = date.getHours() + date.getMinutes() / 60;
+  const offsetHours = startHours - TIMELINE_START;
+
+  // start X (clamp within grid start)
+  const left = Math.max(0, offsetHours * zoomLevel);
+
+  // compute end X and clamp to timeline end (24:00)
+  const rawEndHours = startHours + durationHours;
+  const clampedEndHours = Math.min(rawEndHours, TIMELINE_END); // 24.0
+
+  const endOffsetHours = clampedEndHours - TIMELINE_START;
+  const endX = Math.max(0, endOffsetHours * zoomLevel);
+
+  // width should never exceed the grid end
+  const width = Math.max(4, endX - left);
+
+  // if start is already beyond grid end, keep it at the edge with minimal width
+  const clampedLeft = Math.min(left, totalGridWidth);
+
+  // also clamp width so it never extends beyond totalGridWidth
+  const maxWidth = Math.max(4, totalGridWidth - clampedLeft);
+  const clampedWidth = Math.min(width, maxWidth);
+
+  return { left: `${clampedLeft}px`, width: `${clampedWidth}px` };
+};
+
+
+  const formatTimeHeader = (hour: number) => {
+      const displayHour = hour === 24 ? 0 : hour;
+      return `${String(displayHour).padStart(2, '0')}:00`;
+  };
+
+  const handleItemClick = (type: 'ticket' | 'activity', id: string) => {
+      if (type === 'ticket') {
+          const t = tickets.find(x => x.id === id);
+          if (t) setSelectedItem({ type: 'ticket', data: t });
+      } else {
+          const a = activities.find(x => x.id === id);
+          if (a) setSelectedItem({ type: 'activity', data: a });
+      }
+  };
+
+  // --- Data Derivation ---
+
+  const operationsStaff = useMemo(() => {
+      // Filter for Team Leads AND Field Engineers
+      return technicians.filter(t => 
+          (t.level === 'TEAM_LEAD' || t.level === 'FIELD_ENGINEER') && 
+          t.isActive !== false &&
+          t.status !== 'LEAVE'
+      ).sort((a, b) => {
+          // Prioritize Team Leads in the sort order
+          if (a.level === 'TEAM_LEAD' && b.level !== 'TEAM_LEAD') return -1;
+          if (a.level !== 'TEAM_LEAD' && b.level === 'TEAM_LEAD') return 1;
+          return a.name.localeCompare(b.name);
+      });
+  }, [technicians]);
+
+  const liveFeed = useMemo(() => {
+      const feedItems = [
+          ...tickets.map(t => ({
+              id: t.id,
+              type: 'ticket' as const,
+              refLine: t.id,
+              clientLine: t.customerName,
+              descLine: t.messages[0]?.content || t.category,
+              time: new Date(t.updatedAt),
+              status: t.status
+          })),
+          ...activities.map(a => ({
+              id: a.id,
+              type: 'activity' as const,
+              refLine: a.reference,
+              clientLine: sites.find(s=>s.id===a.siteId)?.clientName || 'Client Site',
+              descLine: a.description || a.type,
+              time: new Date(a.updatedAt || a.createdAt),
+              status: a.status
+          }))
+      ];
+      return feedItems.sort((a, b) => b.time.getTime() - a.time.getTime()).slice(0, 50);
+  }, [tickets, activities, sites]);
+
+  const metrics = useMemo(() => {
+    const activeActs = activities.filter(a => normalizeStatus(a.status) === 'IN_PROGRESS').length;
+    const activeTickets = tickets.filter(t => normalizeStatus(t.status) === 'IN_PROGRESS').length;
+    const activeJobs = activeActs + activeTickets;
+    const crewsOnSite = operationsStaff.filter(t => t.status === 'BUSY').length;
+    const plannedToday = activities.filter(a => new Date(a.plannedDate).toDateString() === new Date().toDateString()).length;
+    const completedToday = activities.filter(a => a.status === 'DONE' && new Date(a.updatedAt).toDateString() === new Date().toDateString()).length;
+    const alertsCount = activities.filter(a => (a.escalationLevel || 0) > 0 && a.status !== 'DONE' && a.status !== 'CANCELLED').length;
+    const utilization = Math.round((activeJobs / (operationsStaff.length || 1)) * 100);
+
+    return { activeJobs, crewsOnSite, plannedToday, alertsCount, utilization, completedToday };
+  }, [activities, tickets, operationsStaff]);
+
+  const timeMarkers = Array.from(
+      { length: TOTAL_HOURS }, // Strictly 0 to 23
+      (_, i) => TIMELINE_START + i
+  );
+
+  const getSystemStatus = () => {
+      if (metrics.alertsCount > 3) return { 
+          label: 'System Critical', 
+          bgColor: 'bg-red-50', 
+          borderColor: 'border-red-200', 
+          textColor: 'text-red-900', 
+          dotColor: 'bg-red-500'
+      };
+      if (metrics.alertsCount > 0) return { 
+          label: 'Warnings Detected', 
+          bgColor: 'bg-amber-50', 
+          borderColor: 'border-amber-200', 
+          textColor: 'text-amber-900',
+          dotColor: 'bg-amber-500'
+      };
+      return { 
+          label: 'Operations Normal', 
+          bgColor: 'bg-emerald-50', 
+          borderColor: 'border-emerald-200', 
+          textColor: 'text-emerald-900', 
+          dotColor: 'bg-emerald-500'
+      };
+  };
+
+  const statusConfig = getSystemStatus();
+  const nowX = getNowX();
+
+  return (
+    <div className="flex flex-col h-[calc(100vh)] bg-slate-100 overflow-hidden font-sans text-slate-900">
+        
+        {/* TOP: KPI & Controls */}
+        <div className="flex-none bg-white z-30 shadow-sm">
+            {/* KPI Row */}
+            <div className="p-4 pb-2 grid grid-cols-6 gap-4 border-b border-slate-200">
+                {/* KPI Cards */}
+                <div className="p-3 rounded-lg border border-slate-200 bg-white shadow-sm flex flex-col justify-between">
+                    <div className="flex justify-between items-start">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Active Jobs</span>
+                        <ActivityIcon size={14} className="text-blue-500"/>
+                    </div>
+                    <div className="flex items-end gap-2 mt-1">
+                        <span className="text-2xl font-bold text-slate-800 leading-none">{metrics.activeJobs}</span>
+                        <span className="text-[10px] font-bold text-emerald-600 mb-0.5">↑</span>
+                    </div>
+                    <div className="h-1 w-full bg-slate-100 rounded-full mt-2 overflow-hidden">
+                        <div className="h-full bg-blue-500" style={{ width: '45%' }}></div>
+                    </div>
+                </div>
+                {/* ... KPI Cards ... */}
+                <div className="p-3 rounded-lg border border-slate-200 bg-white shadow-sm flex flex-col justify-between">
+                    <div className="flex justify-between items-start">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Teams On-Site</span>
+                        <Truck size={14} className="text-indigo-500"/>
+                    </div>
+                    <div className="flex items-end gap-2 mt-1">
+                        <span className="text-2xl font-bold text-slate-800 leading-none">{metrics.crewsOnSite}</span>
+                        <span className="text-[10px] font-medium text-slate-400 mb-0.5">/ {operationsStaff.length}</span>
+                    </div>
+                    <div className="h-1 w-full bg-slate-100 rounded-full mt-2 overflow-hidden">
+                        <div className="h-full bg-indigo-500" style={{ width: `${(metrics.crewsOnSite/operationsStaff.length)*100}%` }}></div>
+                    </div>
+                </div>
+                <div className="p-3 rounded-lg border border-slate-200 bg-white shadow-sm flex flex-col justify-between">
+                    <div className="flex justify-between items-start">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Planned Today</span>
+                        <Calendar size={14} className="text-slate-400"/>
+                    </div>
+                    <div className="flex items-end gap-2 mt-1">
+                        <span className="text-2xl font-bold text-slate-800 leading-none">{metrics.plannedToday}</span>
+                    </div>
+                    <div className="h-1 w-full bg-slate-100 rounded-full mt-2 overflow-hidden">
+                        <div className="h-full bg-slate-400" style={{ width: '70%' }}></div>
+                    </div>
+                </div>
+                <div className={`p-3 rounded-lg border shadow-sm flex flex-col justify-between ${metrics.alertsCount > 0 ? 'bg-red-50 border-red-200' : 'bg-white border-slate-200'}`}>
+                    <div className="flex justify-between items-start">
+                        <span className={`text-[10px] font-bold uppercase tracking-wider ${metrics.alertsCount > 0 ? 'text-red-600' : 'text-slate-400'}`}>Alerts</span>
+                        <ShieldAlert size={14} className={metrics.alertsCount > 0 ? 'text-red-600 animate-pulse' : 'text-slate-300'}/>
+                    </div>
+                    <div className="flex items-end gap-2 mt-1">
+                        <span className={`text-2xl font-bold leading-none ${metrics.alertsCount > 0 ? 'text-red-700' : 'text-slate-800'}`}>{metrics.alertsCount}</span>
+                    </div>
+                    <div className="h-1 w-full bg-slate-100 rounded-full mt-2 overflow-hidden">
+                        <div className={`h-full ${metrics.alertsCount > 0 ? 'bg-red-500' : 'bg-emerald-500'}`} style={{ width: metrics.alertsCount > 0 ? '100%' : '0%' }}></div>
+                    </div>
+                </div>
+                <div className="p-3 rounded-lg border border-slate-200 bg-white shadow-sm flex flex-col justify-between">
+                    <div className="flex justify-between items-start">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Utilization</span>
+                        <Zap size={14} className={metrics.utilization > 80 ? 'text-amber-500' : 'text-slate-300'}/>
+                    </div>
+                    <div className="flex items-end gap-2 mt-1">
+                        <span className="text-2xl font-bold text-slate-800 leading-none">{metrics.utilization}%</span>
+                    </div>
+                    <div className="h-1 w-full bg-slate-100 rounded-full mt-2 overflow-hidden">
+                        <div className={`h-full ${metrics.utilization > 80 ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${metrics.utilization}%` }}></div>
+                    </div>
+                </div>
+                <div className="p-3 rounded-lg border border-slate-200 bg-white shadow-sm flex flex-col justify-between">
+                    <div className="flex justify-between items-start">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Completed</span>
+                        <CheckCircle2 size={14} className="text-emerald-500"/>
+                    </div>
+                    <div className="flex items-end gap-2 mt-1">
+                        <span className="text-2xl font-bold text-slate-800 leading-none">{metrics.completedToday}</span>
+                    </div>
+                    <div className="h-1 w-full bg-slate-100 rounded-full mt-2 overflow-hidden">
+                        <div className="h-full bg-emerald-500" style={{ width: '30%' }}></div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Toolbar & Status Pill */}
+            <div className="bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between gap-4">
+                
+                {/* Status Pill */}
+                <div className={`flex items-center gap-3 px-4 py-1.5 rounded-full border ${statusConfig.bgColor} ${statusConfig.borderColor} transition-colors`}>
+                    <div className={`w-2 h-2 rounded-full ${statusConfig.dotColor} animate-pulse`} />
+                    <span className={`text-xs font-bold ${statusConfig.textColor}`}>{statusConfig.label}</span>
+                    <span className={`text-[10px] ${statusConfig.textColor} opacity-60 border-l border-current pl-3 ml-1`}>
+                        Last updated {currentTime.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}
+                    </span>
+                </div>
+
+                {/* Zoom Controls */}
+                <div className="flex items-center gap-2">
+                    <button onClick={() => setZoomLevel(prev => Math.max(60, prev - 20))} className="p-1.5 text-slate-500 hover:bg-slate-100 rounded border border-transparent hover:border-slate-200 transition-colors"><ZoomOut size={16}/></button>
+                    <span className="text-[10px] font-mono text-slate-400 min-w-[60px] text-center font-medium">{zoomLevel} px/hr</span>
+                    <button onClick={() => setZoomLevel(prev => Math.min(300, prev + 20))} className="p-1.5 text-slate-500 hover:bg-slate-100 rounded border border-transparent hover:border-slate-200 transition-colors"><ZoomIn size={16}/></button>
+                </div>
+            </div>
+        </div>
+
+        {/* MAIN LAYOUT: FIXED 3-COLUMN GRID */}
+        <div className="flex-1 overflow-hidden grid grid-cols-[280px_minmax(0,1fr)_240px]">
+            
+            {/* COLUMN 1: LEFT TEAMS (Fixed Width) */}
+            <div className="flex flex-col border-r border-slate-200 bg-white relative z-20">
+                {/* Header Row */}
+                <div className="h-10 border-b border-slate-200 bg-slate-50 flex items-center px-4 font-bold text-[10px] text-slate-500 uppercase tracking-wider shrink-0">
+                    Field Operations
+                </div>
+                {/* Vertically Scrollable List (Synced via JS) */}
+                <div 
+                    ref={leftColRef}
+                    className="flex-1 overflow-hidden bg-white"
+                    onWheel={handleLeftWheel}
+                >
+                    {operationsStaff.map(tech => {
+                        const workload = getTechWorkload(tech.id);
+                        const capacity = 8;
+                        const utilization = Math.min(100, Math.round((workload/capacity)*100));
+                        
+                        // Find Associates for this lead based on Team structure
+                        const team = teams.find(t => t.leadId === tech.id);
+                        const associates = team?.memberIds
+                            .map(mId => technicians.find(t => t.id === mId))
+                            .filter(Boolean) || [];
+
+                        return (
+                            <div key={tech.id} className="h-24 border-b border-slate-200 p-3 flex flex-col justify-center">
+                                <div className="flex items-center gap-3 mb-2">
+                                    <div className="relative">
+                                        <img src={tech.avatar} className="w-9 h-9 rounded-full bg-slate-200 border border-slate-100 object-cover" alt=""/>
+                                        <div className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white ${
+                                            tech.status === 'AVAILABLE' ? 'bg-emerald-500' : 'bg-blue-500'
+                                        }`} />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                        <div className="flex items-center gap-2">
+                                            <span className="font-bold text-slate-800 text-xs truncate">
+                                                {`Team ${tech.name.split(' ')[0]}`}
+                                            </span>
+                                            {tech.status === 'BUSY' && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" title="On Site"/>}
+                                        </div>
+                                        <div className="text-[10px] text-slate-500 flex items-center gap-1">
+                                            <span className={utilization > 100 ? 'text-red-500 font-bold' : 'text-slate-400'}>
+                                                {workload}h / {capacity}h
+                                            </span>
+                                            <span className="text-slate-300">|</span>
+                                            <span className="text-slate-400">{utilization}% Util</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                {/* Associates Chip List (Show for ALL rows) */}
+                                <div className="flex flex-wrap gap-1 mb-1">
+                                {associates.length > 0 ? (
+                                    associates.map((assoc: any) => (
+                                    <span
+                                        key={assoc.id}
+                                        className="px-1.5 py-0.5 bg-slate-100 text-[9px] font-medium text-slate-600 rounded flex items-center gap-1"
+                                    >
+                                        <Users size={8} className="text-slate-400" /> {assoc.name.split(' ')[0]}
+                                    </span>
+                                    ))
+                                ) : (
+                                    <span className="text-[9px] text-slate-300 italic">No associates assigned</span>
+                                )}
+                                </div>
+
+                                
+                                <div className="h-1 w-full bg-slate-100 rounded-full overflow-hidden">
+                                    <div 
+                                        className={`h-full rounded-full ${utilization > 100 ? 'bg-red-500' : utilization > 80 ? 'bg-amber-400' : 'bg-emerald-400'}`} 
+                                        style={{ width: `${utilization}%` }} 
+                                    />
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+
+            {/* COLUMN 2: CENTER TIMELINE (Horizontal Scroll) */}
+            <div className="flex flex-col overflow-hidden relative min-w-0">
+                {/* Header Scroller */}
+                <div 
+                    ref={headerScrollRef}
+                    className="h-10 border-b border-slate-200 bg-white overflow-x-auto overflow-y-hidden no-scrollbar shrink-0"
+                    onScroll={handleHeaderScroll}
+                >
+                    <div className="relative h-full" style={{ width: `${totalGridWidth}px` }}>
+                        {timeMarkers.map(hour => {
+                            if (hour > TIMELINE_END) return null; // Don't render marker after end
+                            const offset = (hour - TIMELINE_START) * zoomLevel;
+                            const displayHour = hour === 24 ? 0 : hour;
+                            const hh = String(displayHour).padStart(2, '0');
+                            const showHalf = zoomLevel >= 180;
+                            
+                            return (
+                                <div 
+                                    key={hour} 
+                                    className="absolute top-0 bottom-0 border-l border-slate-200 pl-1 flex items-center text-[10px] font-mono font-medium tracking-wide text-slate-500 select-none" 
+                                    style={{ left: `${offset}px`, width: `${zoomLevel}px` }}
+                                >
+                                    <span>{hh}:00</span>
+                                    {hour < TIMELINE_END && showHalf && (
+                                        <span className="absolute left-1/2 text-slate-300 font-normal">
+                                            {hh}:30
+                                        </span>
+                                    )}
+                                </div>
+                            );
+                        })}
+                        {/* Header Red Line (NOW) */}
+                        {nowX >= 0 && nowX <= totalGridWidth && (
+                            <div 
+                                className="absolute top-0 bottom-0 z-50 pointer-events-none" 
+                                style={{ left: `${nowX}px` }}
+                            >
+                                <div className="h-full border-l-2 border-red-500 relative">
+                                    <div className="absolute -top-0 -left-[5px] w-0 h-0 border-l-[5px] border-l-transparent border-r-[5px] border-r-transparent border-t-[6px] border-t-red-500" />
+                                    <div className="absolute -top-6 left-2 bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap opacity-90 shadow-sm">
+                                        NOW - {currentTime.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* Body Scroller (Main Driver) */}
+                <div 
+                    ref={bodyScrollRef}
+                    className="relative flex-1 overflow-x-auto overflow-y-auto bg-slate-50/50"
+                    onScroll={handleBodyScroll}
+                >
+                    <div className="relative" style={{ width: `${totalGridWidth}px` }}>
+                        {/* Grid Background */}
+                        <div className="absolute inset-0 flex pointer-events-none z-0 h-full">
+                            {timeMarkers.map(hour => {
+                                if (hour > TIMELINE_END) return null;
+                                const showHalf = zoomLevel >= 180;
+                                return (
+                                  <div
+                                    key={hour}
+                                    className={`relative h-full flex-shrink-0 border-r border-slate-200/80 ${hour % 2 === 0 ? "bg-slate-50/30" : ""}`}
+                                    style={{ width: `${zoomLevel}px` }}
+                                  >
+                                    {hour < TIMELINE_END && showHalf && (
+                                        <div className="absolute left-1/2 top-0 bottom-0 border-r border-slate-100 pointer-events-none" />
+                                    )}
+                                  </div>
+                                );
+                            })}
+                        </div>
+
+                        {/* Body Red Line (NOW) - Standard Absolute Positioning */}
+                        {nowX >= 0 && nowX <= totalGridWidth && (
+                            <div 
+                                className="absolute top-0 bottom-0 z-40 pointer-events-none border-l-2 border-red-500"
+                                style={{ left: `${nowX}px` }}
+                            >
+                                {/* Triangle Indicator */}
+                                <div className="absolute -top-[5px] -left-[5px] w-0 h-0 border-l-[5px] border-l-transparent border-r-[5px] border-r-transparent border-t-[6px] border-t-red-500" />
+                            </div>
+                        )}
+
+                        {/* Rows */}
+                        {operationsStaff.map(tech => {
+                            // Unified timeline items (both Activities and Tickets)
+                            // 1. Normalize Activities
+                            const techActivities = activities.filter(a => a.leadTechId === tech.id).map(a => ({
+                                id: a.id,
+                                reference: a.reference,
+                                type: 'activity',
+                                status: normalizeStatus(a.status),
+                                priority: a.priority,
+                                plannedDate: a.plannedDate || a.createdAt || new Date().toISOString(),
+                                durationHours: a.durationHours || 2,
+                                description: a.description || a.type,
+                                escalationLevel: a.escalationLevel || 0
+                            }));
+
+                            // 2. Normalize Tickets (only if assigned and IN_PROGRESS/OPEN)
+                            const techTickets = tickets
+                                .filter(t => t.assignedTechId === tech.id && normalizeStatus(t.status) === 'IN_PROGRESS')
+                                .map(t => ({
+                                    id: t.id,
+                                    reference: t.id,
+                                    type: 'ticket',
+                                    status: 'IN_PROGRESS',
+                                    priority: t.priority,
+                                    plannedDate: t.appointmentTime || t.createdAt || new Date().toISOString(),
+                                    durationHours: 2, // Default duration for tickets if untracked
+                                    description: t.customerName + ' - ' + t.category,
+                                    escalationLevel: 0
+                                }));
+
+                            const timelineItems = [...techActivities, ...techTickets];
+
+                            return (
+                                <div key={tech.id} className="h-24 border-b border-slate-200 relative w-full hover:bg-slate-100/50 transition-colors">
+                                    {timelineItems.map((item: any) => {
+                                        const style = getPositionStyle(item.plannedDate, item.durationHours);
+                                        const isTicket = item.type === 'ticket';
+                                        
+                                        return (
+                                            <div 
+                                                key={item.id}
+                                                className={`absolute top-3 bottom-3 rounded border shadow-sm p-1.5 flex flex-col justify-center cursor-pointer hover:z-20 hover:shadow-md hover:ring-2 ring-opacity-50 transition-all z-20 overflow-hidden ${
+                                                    isTicket ? 'bg-purple-50 border-purple-200 text-purple-900 ring-purple-400' :
+                                                    item.status === 'DONE' ? 'bg-slate-100 border-slate-200 text-slate-500 grayscale' :
+                                                    item.status === 'IN_PROGRESS' ? 'bg-blue-50 border-blue-200 text-blue-900 ring-blue-400' :
+                                                    item.escalationLevel > 0 ? 'bg-red-50 border-red-200 text-red-900 ring-red-400' :
+                                                    'bg-white border-slate-200 text-slate-700 hover:border-slate-300'
+                                                }`}
+                                                style={style}
+                                                onClick={() => handleItemClick(isTicket ? 'ticket' : 'activity', item.id)}
+                                                title={`${item.description} - ${new Date(item.plannedDate).toLocaleTimeString()}`}
+                                            >
+                                                <div className="flex items-center gap-1 font-bold text-[10px] leading-tight truncate">
+                                                    {isTicket && <TicketIcon size={10} />}
+                                                    {item.reference}
+                                                </div>
+                                                <div className="text-[9px] truncate opacity-80 leading-tight">
+                                                    {item.description}
+                                                </div>
+                                                {item.status === 'IN_PROGRESS' && (
+                                                    <div className="mt-1 h-0.5 w-full bg-blue-200 rounded-full overflow-hidden">
+                                                        <div className="h-full bg-blue-500 animate-pulse w-2/3"></div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            </div>
+
+            {/* COLUMN 3: RIGHT FEED (Fixed Width) */}
+            <div className="flex flex-col border-l border-slate-200 bg-white z-20 shadow-[-4px_0_15px_-3px_rgba(0,0,0,0.02)]">
+                <div className="h-10 border-b border-slate-100 bg-slate-50 flex items-center px-3 justify-between shrink-0">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                        <History size={12} /> Live Feed
+                    </span>
+                    <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
+                </div>
+                <div className="flex-1 overflow-y-auto p-0">
+                    {liveFeed.map((item, i) => (
+                        <div 
+                            key={`${item.id}-${i}`} 
+                            onClick={() => handleItemClick(item.type, item.id)}
+                            className="p-3 border-b border-slate-50 hover:bg-black/[0.03] transition-colors group cursor-pointer relative"
+                        >
+                            <div className="flex items-center justify-between mb-1">
+                                <span className="text-[9px] font-mono text-slate-400">{item.time.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+                                <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${
+                                    normalizeStatus(item.status) === 'IN_PROGRESS' ? 'bg-blue-100 text-blue-700' :
+                                    item.status === 'DONE' || item.status === 'RESOLVED' ? 'bg-emerald-100 text-emerald-700' :
+                                    item.status === 'NEW' ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-500'
+                                }`}>{item.status.replace('_', ' ')}</span>
+                            </div>
+                            <div className="flex items-start gap-2 pr-4">
+                                <div className={`mt-0.5 p-1 rounded-full ${item.type === 'ticket' ? 'bg-purple-50 text-purple-600' : 'bg-blue-50 text-blue-600'}`}>
+                                    {item.type === 'ticket' ? <TicketIcon size={10} /> : <ActivityIcon size={10} />}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                    <p className="text-[10px] font-bold text-slate-800 leading-tight">{item.refLine}</p>
+                                    <p className="text-[10px] text-slate-600 mt-0.5 font-medium truncate">{item.clientLine}</p>
+                                    <p className="text-[9px] text-slate-400 mt-0.5 truncate">{item.descLine}</p>
+                                </div>
+                            </div>
+                            <ChevronRight size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-900/45 group-hover:text-slate-900/75 transition-colors" />
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+
+        {/* Details Drawer (Overlay) */}
+        {selectedItem && (
+             <div className="absolute top-0 right-0 h-full w-[350px] md:w-[420px] bg-white shadow-2xl border-l border-slate-200 z-50 animate-in slide-in-from-right duration-300 flex flex-col">
+                 <div className="p-4 border-b border-slate-100 flex justify-between items-start bg-slate-50">
+                     <div>
+                         <div className="flex items-center gap-2 mb-1">
+                             <span className="text-xs font-mono text-slate-400 bg-white border px-1 rounded">
+                                {selectedItem.type === 'activity' ? (selectedItem.data as Activity).reference : (selectedItem.data as Ticket).id}
+                             </span>
+                             <span className="text-[10px] font-bold uppercase text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
+                                {selectedItem.data.status.replace('_', ' ')}
+                             </span>
+                         </div>
+                         <h3 className="font-bold text-slate-900 text-sm leading-tight uppercase tracking-tight">
+                             {selectedItem.type === 'activity' ? (selectedItem.data as Activity).type : (selectedItem.data as Ticket).category}
+                         </h3>
+                     </div>
+                     <button onClick={() => setSelectedItem(null)} className="p-1 hover:bg-slate-200 rounded transition-colors"><X size={16} className="text-slate-500"/></button>
+                 </div>
+                 
+                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                     {/* Customer Info Section */}
+                     <div className="p-3 bg-white rounded-lg border border-slate-200 shadow-sm space-y-2">
+                         <div className="flex items-center gap-2 text-xs font-bold text-slate-800 uppercase border-b border-slate-100 pb-2 mb-2">
+                             <User size={12}/> Customer
+                         </div>
+                         <div className="flex justify-between items-start">
+                             <div>
+                                 <div className="text-sm font-bold text-slate-800">
+                                     {selectedItem.type === 'activity' ? 
+                                        (customers?.find(c => c.id === (selectedItem.data as Activity).customerId)?.name || 'Unknown') : 
+                                        (selectedItem.data as Ticket).customerName}
+                                 </div>
+                                 <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-1">
+                                     <Phone size={10} /> 
+                                     {selectedItem.type === 'ticket' ? (selectedItem.data as Ticket).phoneNumber : 'Contact on file'}
+                                 </div>
+                             </div>
+                         </div>
+                     </div>
+
+                     {/* Location Section */}
+                     <div className="p-3 bg-blue-50/50 rounded-lg border border-blue-100 space-y-2">
+                         <h4 className="text-[10px] font-bold text-blue-800 uppercase flex items-center gap-1">
+                             <MapPin size={10} /> Location
+                         </h4>
+                         <div className="text-xs text-slate-700 font-medium">
+                            {selectedItem.type === 'activity' ? 
+                                (sites.find(s=>s.id===(selectedItem.data as Activity).siteId)?.name || (selectedItem.data as Activity).houseNumber || 'Client Site') : 
+                                ((selectedItem.data as Ticket).houseNumber || 'Location Provided')}
+                         </div>
+                         {selectedItem.data.locationUrl && (
+                             <a href={selectedItem.data.locationUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-[10px] font-bold text-blue-600 hover:underline">
+                                 <ExternalLink size={10} /> Open Map
+                             </a>
+                         )}
+                     </div>
+
+                     {/* Time & Schedule */}
+                     <div>
+                         <label className="text-[10px] font-bold text-slate-400 uppercase">Timing</label>
+                         <div className="flex items-center gap-2 text-xs font-mono text-slate-700 mt-1 bg-slate-50 p-2 rounded border border-slate-100">
+                             <Clock size={12} className="text-slate-400" />
+                             {selectedItem.type === 'activity' ? (
+                                 <>
+                                    {new Date((selectedItem.data as Activity).plannedDate).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+                                    <ArrowRight size={10} className="text-slate-300"/>
+                                    {new Date(new Date((selectedItem.data as Activity).plannedDate).getTime() + (selectedItem.data as Activity).durationHours*3600000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+                                 </>
+                             ) : (
+                                 <span>Created: {new Date((selectedItem.data as Ticket).createdAt).toLocaleString()}</span>
+                             )}
+                         </div>
+                         {selectedItem.type === 'ticket' && (selectedItem.data as Ticket).updatedAt && (
+                             <div className="text-[10px] text-slate-400 mt-1 text-right">
+                                 Last Update: {new Date((selectedItem.data as Ticket).updatedAt).toLocaleTimeString()}
+                             </div>
+                         )}
+                     </div>
+
+                     {/* Assigned Resource */}
+                     <div>
+                         <label className="text-[10px] font-bold text-slate-400 uppercase">Assigned To</label>
+                         <div className="flex items-center gap-2 mt-1">
+                             <div className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-[10px] font-bold text-slate-500">
+                                 <Users size={12}/>
+                             </div>
+                             <span className="text-xs font-medium text-slate-700">
+                                 {selectedItem.type === 'activity' ? 
+                                    (technicians.find(t => t.id === (selectedItem.data as Activity).leadTechId)?.name || 'Unassigned') : 
+                                    (technicians.find(t => t.id === (selectedItem.data as Ticket).assignedTechId)?.name || 'Unassigned')}
+                             </span>
+                         </div>
+                     </div>
+
+                     {/* Description */}
+                     <div>
+                         <label className="text-[10px] font-bold text-slate-400 uppercase">Description</label>
+                         <p className="text-xs text-slate-600 mt-1 leading-relaxed bg-slate-50 p-2 rounded border border-slate-100 whitespace-pre-wrap">
+                             {selectedItem.type === 'activity' ? (selectedItem.data as Activity).description : (selectedItem.data as Ticket).messages[0]?.content || "No description"}
+                         </p>
+                     </div>
+                 </div>
+
+                 {/* Drawer Footer Actions */}
+                 <div className="p-4 border-t border-slate-100 bg-slate-50 flex gap-3">
+                     <button 
+                        onClick={() => setSelectedItem(null)}
+                        className="flex-1 py-2 text-xs font-bold text-slate-500 hover:bg-slate-200 rounded transition-colors"
+                     >
+                         Close
+                     </button>
+                     <button 
+                        onClick={() => {
+                            if (!selectedItem) {
+                                alert("No item selected");
+                                return;
+                            }
+                            if (onNavigate) {
+                                onNavigate(selectedItem.type, selectedItem.data.id);
+                                setSelectedItem(null);
+                            } else {
+                                console.warn("Navigation handler missing");
+                            }
+                        }}
+                        className="flex-1 py-2 bg-slate-900 text-white rounded text-xs font-bold hover:bg-slate-800 shadow-sm"
+                     >
+                         Open Full View
+                     </button>
+                 </div>
+             </div>
+        )}
+    </div>
+  );
+};
+
+export default OperationsDashboard;

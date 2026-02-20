@@ -1,0 +1,127 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WhatsApp Support Hub</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              slate: {
+                850: '#1e293b',
+                900: '#0f172a',
+                950: '#020617',
+              },
+              emerald: {
+                550: '#10b981',
+              }
+            },
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+            },
+          },
+        },
+      }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/react-datepicker/4.25.0/react-datepicker.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <style>
+      body { font-family: 'Inter', sans-serif; }
+      
+      /* Global Apple-style Scrollbar Configuration */
+      :root {
+        --scrollbar-width: 8px;
+        --scrollbar-thumb: rgba(0, 0, 0, 0.18);
+        --scrollbar-thumb-hover: rgba(0, 0, 0, 0.28);
+      }
+
+      /* Firefox */
+      * {
+        scrollbar-width: thin;
+        scrollbar-color: var(--scrollbar-thumb) transparent;
+      }
+
+      /* Chrome, Edge, Safari */
+      *::-webkit-scrollbar {
+        width: var(--scrollbar-width);
+        height: var(--scrollbar-width);
+      }
+
+      *::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
+      *::-webkit-scrollbar-thumb {
+        background-color: var(--scrollbar-thumb);
+        border-radius: 9999px;
+        border: 2px solid transparent;
+        background-clip: content-box;
+      }
+
+      *::-webkit-scrollbar-thumb:hover {
+        background-color: var(--scrollbar-thumb-hover);
+      }
+
+      /* Hide scrollbar utility */
+      .no-scrollbar::-webkit-scrollbar {
+          display: none;
+      }
+      .no-scrollbar {
+          -ms-overflow-style: none;  /* IE and Edge */
+          scrollbar-width: none;  /* Firefox */
+      }
+
+      /* Custom DatePicker Overrides to match theme */
+      .react-datepicker-wrapper {
+        width: 100%;
+      }
+      .react-datepicker__input-container input {
+        width: 100%;
+      }
+      .react-datepicker {
+        font-family: 'Inter', sans-serif;
+        border-color: #e2e8f0;
+        box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+      }
+      .react-datepicker__header {
+        background-color: #f8fafc;
+        border-bottom-color: #e2e8f0;
+      }
+      .react-datepicker__day--selected, .react-datepicker__day--keyboard-selected {
+        background-color: #10b981 !important;
+        color: white !important;
+      }
+      .react-datepicker__day--in-range {
+        background-color: #d1fae5 !important;
+        color: #065f46 !important;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "@google/genai": "https://esm.sh/@google/genai@^1.39.0",
+    "lucide-react": "https://esm.sh/lucide-react@^0.563.0?external=react,react-dom",
+    "react": "https://esm.sh/react@18.3.1",
+    "react/": "https://esm.sh/react@18.3.1/",
+    "react-dom": "https://esm.sh/react-dom@18.3.1",
+    "react-dom/": "https://esm.sh/react-dom@18.3.1/",
+    "recharts": "https://esm.sh/recharts@^2.12.7?external=react,react-dom",
+    "react-datepicker": "https://esm.sh/react-datepicker@^4.25.0?external=react,react-dom",
+    "jszip": "https://esm.sh/jszip@3.10.1",
+    "express": "https://esm.sh/express@^5.2.1",
+    "cors": "https://esm.sh/cors@^2.8.6",
+    "dotenv": "https://esm.sh/dotenv@^17.3.1"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body class="bg-slate-50 text-slate-900 antialiased">
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>

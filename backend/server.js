@@ -139,6 +139,20 @@ async function nextCustomerId() {
   return toCustomerId(Number(rows[0].id));
 }
 
+// ==============================
+// Tickets (PostgreSQL)
+// ==============================
+function toTicketId(n) {
+  return `QNC-TKT-${String(n).padStart(4, "0")}`;
+}
+
+async function nextTicketId() {
+  const { rows } = await pool.query(
+    "INSERT INTO ticket_id_seq DEFAULT VALUES RETURNING id"
+  );
+  return toTicketId(Number(rows[0].id));
+}
+
 // List customers (optional search: ?q=)
 app.get("/api/customers", async (req, res) => {
   try {

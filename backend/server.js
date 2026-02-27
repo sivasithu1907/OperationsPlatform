@@ -408,6 +408,70 @@ app.get("/api/tickets/:id/history", async (req, res) => {
   }
 });
 
+// Assign ticket to a user (Lead/Team Lead)
+app.put("/api/tickets/:id/assign", async (req, res) => {
+  try {
+    const id = String(req.params.id || "").trim();
+
+    const {
+      userId,
+      userName,
+      note = null,
+      actorUserId = null,
+      actorUserName = null,
+    } = req.body || {};
+
+    if (!id) return res.status(400).json({ error: "Ticket id is required" });
+    if (!userId || !userName) {
+      return res.status(400).json({ error: "userId and userName are required" });
+    }
+
+    // Load current ticket (for from_status)
+    const current = await pool.query(`SELECT status FROM tickets WHERE id=$1`, [id]);
+    if (!current.rows[0]) return res.status(404).json({ error: "Ticket not found" });
+
+    const fromStatus = current.rows[0].status;
+
+    // Update ticket assignment + status
+    const updated = await pool.query(
+      `
+      UPDATE tickets
+      SET
+        assigned_user_id = $2,
+        assigned_user_name = $3,
+        status = 'ASSIGNED',
+        updated_at = NOW()
+      WHERE id = $1
+      RETURNING *
+      `,
+      [id, String(userId).trim(), String(userName).trim()]
+    );
+
+    // Write event
+    await pool.query(
+      `
+      INSERT INTO ticket_events (
+        ticket_id, event_type, from_status, to_status, note,
+        actor_user_id, actor_user_name
+      )
+      VALUES ($1,'ASSIGNED',$2,'ASSIGNED',$3,$4,$5)
+      `,
+      [
+        id,
+        fromStatus || null,
+        note ? String(note).trim() : `Assigned to ${String(userName).trim()}`,
+        actorUserId ? String(actorUserId).trim() : null,
+        actorUserName ? String(actorUserName).trim() : null,
+      ]
+    );
+
+    res.json(updated.rows[0]);
+  } catch (e) {
+    console.error("ticket assign error:", e);
+    res.status(500).json({ error: "Failed to assign ticket" });
+  }
+});
+
 // Analyze Endpoint
 app.post('/api/analyze', async (req, res) => {
   try {

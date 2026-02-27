@@ -536,6 +536,47 @@ app.put("/api/tickets/:id/status", async (req, res) => {
   }
 });
 
+// Add a note to ticket (no status change)
+app.post("/api/tickets/:id/note", async (req, res) => {
+  try {
+    const id = String(req.params.id || "").trim();
+    const { note, actorUserId = null, actorUserName = null } = req.body || {};
+
+    if (!id) return res.status(400).json({ error: "Ticket id is required" });
+    if (!note || String(note).trim().length < 1) {
+      return res.status(400).json({ error: "note is required" });
+    }
+
+    // ensure ticket exists
+    const t = await pool.query(`SELECT id FROM tickets WHERE id=$1`, [id]);
+    if (!t.rows[0]) return res.status(404).json({ error: "Ticket not found" });
+
+    await pool.query(
+      `
+      INSERT INTO ticket_events (
+        ticket_id, event_type, from_status, to_status, note,
+        actor_user_id, actor_user_name
+      )
+      VALUES ($1,'NOTE',NULL,NULL,$2,$3,$4)
+      `,
+      [
+        id,
+        String(note).trim(),
+        actorUserId ? String(actorUserId).trim() : null,
+        actorUserName ? String(actorUserName).trim() : null,
+      ]
+    );
+
+    // touch updated_at
+    await pool.query(`UPDATE tickets SET updated_at = NOW() WHERE id=$1`, [id]);
+
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("ticket note error:", e);
+    res.status(500).json({ error: "Failed to add note" });
+  }
+});
+
 // Analyze Endpoint
 app.post('/api/analyze', async (req, res) => {
   try {

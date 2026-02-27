@@ -269,6 +269,56 @@ app.delete("/api/customers/:id", async (req, res) => {
   }
 });
 
+// ==============================
+// Tickets API (PostgreSQL)
+// ==============================
+
+// List tickets
+// Optional filters:
+//   ?status=NEW
+//   ?q=search text
+//   ?customerId=QNC-CUST-0001
+app.get("/api/tickets", async (req, res) => {
+  try {
+    const status = String(req.query.status || "").trim();
+    const q = String(req.query.q || "").trim();
+    const customerId = String(req.query.customerId || "").trim();
+
+    const where = [];
+    const params = [];
+
+    if (status) {
+      params.push(status);
+      where.push(`status = $${params.length}`);
+    }
+
+    if (customerId) {
+      params.push(customerId);
+      where.push(`customer_id = $${params.length}`);
+    }
+
+    if (q) {
+      params.push(`%${q}%`);
+      const p = `$${params.length}`;
+      where.push(`(id ILIKE ${p} OR title ILIKE ${p} OR description ILIKE ${p} OR assigned_user_name ILIKE ${p})`);
+    }
+
+    const sql = `
+      SELECT *
+      FROM tickets
+      ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+      ORDER BY created_at DESC
+      LIMIT 200
+    `;
+
+    const result = await pool.query(sql, params);
+    res.json(result.rows);
+  } catch (e) {
+    console.error("tickets list error:", e);
+    res.status(500).json({ error: "Failed to list tickets" });
+  }
+});
+
 // Analyze Endpoint
 app.post('/api/analyze', async (req, res) => {
   try {

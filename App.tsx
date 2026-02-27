@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
-  APP_NAME, NAVIGATION_ITEMS, MOCK_TICKETS, MOCK_TECHNICIANS, 
+  APP_NAME, NAVIGATION_ITEMS, MOCK_TECHNICIANS,
   MOCK_ACTIVITIES, MOCK_TEAMS, MOCK_SITES, MOCK_CUSTOMERS 
 } from './constants';
 import { 
@@ -38,7 +38,7 @@ function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   
   // Data State
-  const [tickets, setTickets] = useState<Ticket[]>(MOCK_TICKETS);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
   const [activities, setActivities] = useState<Activity[]>(MOCK_ACTIVITIES);
   const [technicians, setTechnicians] = useState<Technician[]>(MOCK_TECHNICIANS);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -58,6 +58,25 @@ function App() {
   const [ticketFilter, setTicketFilter] = useState<TicketFilter | null>(null);
   const [focusedTicketId, setFocusedTicketId] = useState<string | null>(null);
   const [targetActivityId, setTargetActivityId] = useState<string | null>(null);
+
+// ==============================
+// API: Tickets
+// ==============================
+const fetchTickets = async () => {
+  try {
+    const res = await fetch("/api/tickets");
+    if (!res.ok) throw new Error(`Failed to fetch tickets: ${res.status}`);
+    const rows = await res.json();
+    setTickets(Array.isArray(rows) ? rows : []);
+  } catch (err) {
+    console.error(err);
+    setTickets([]);
+  }
+};
+
+useEffect(() => {
+  fetchTickets();
+}, []);
 
   // --- Global Search State ---
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');

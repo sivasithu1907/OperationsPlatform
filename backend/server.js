@@ -472,6 +472,70 @@ app.put("/api/tickets/:id/assign", async (req, res) => {
   }
 });
 
+// Change ticket status
+app.put("/api/tickets/:id/status", async (req, res) => {
+  try {
+    const id = String(req.params.id || "").trim();
+    const {
+      status,
+      note = null,
+      actorUserId = null,
+      actorUserName = null,
+    } = req.body || {};
+
+    if (!id) return res.status(400).json({ error: "Ticket id is required" });
+    if (!status) return res.status(400).json({ error: "status is required" });
+
+    const nextStatus = String(status).trim().toUpperCase();
+
+    const allowed = ["NEW", "ASSIGNED", "IN_PROGRESS", "ON_HOLD", "RESOLVED", "CANCELLED"];
+    if (!allowed.includes(nextStatus)) {
+      return res.status(400).json({ error: `Invalid status. Allowed: ${allowed.join(", ")}` });
+    }
+
+    // Load current
+    const current = await pool.query(`SELECT status FROM tickets WHERE id=$1`, [id]);
+    if (!current.rows[0]) return res.status(404).json({ error: "Ticket not found" });
+
+    const fromStatus = current.rows[0].status;
+
+    // Update
+    const updated = await pool.query(
+      `
+      UPDATE tickets
+      SET status = $2, updated_at = NOW()
+      WHERE id = $1
+      RETURNING *
+      `,
+      [id, nextStatus]
+    );
+
+    // Event
+    await pool.query(
+      `
+      INSERT INTO ticket_events (
+        ticket_id, event_type, from_status, to_status, note,
+        actor_user_id, actor_user_name
+      )
+      VALUES ($1,'STATUS_CHANGED',$2,$3,$4,$5,$6)
+      `,
+      [
+        id,
+        fromStatus || null,
+        nextStatus,
+        note ? String(note).trim() : `Status changed to ${nextStatus}`,
+        actorUserId ? String(actorUserId).trim() : null,
+        actorUserName ? String(actorUserName).trim() : null,
+      ]
+    );
+
+    res.json(updated.rows[0]);
+  } catch (e) {
+    console.error("ticket status error:", e);
+    res.status(500).json({ error: "Failed to update ticket status" });
+  }
+});
+
 // Analyze Endpoint
 app.post('/api/analyze', async (req, res) => {
   try {

@@ -1,7 +1,7 @@
 
 import express from 'express';
 import cors from 'cors';
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import dotenv from 'dotenv';
 import { pool } from "./db.js";
 
@@ -250,8 +250,8 @@ app.post('/api/analyze', async (req, res) => {
     
     const context = history.length > 0 ? `Conversation History:\n${history.join('\n')}\n\n` : '';
     
-    const response = await genAI.models.generateContent({
-      model: "gemini-1.5-flash",
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const result = await model.generateContent({
       contents: [
         {
           role: "user",
@@ -357,8 +357,8 @@ app.post('/api/chat', async (req, res) => {
       parts: [{ text: newMessage }]
     });
 
-    const response = await genAI.models.generateContent({
-      model: "gemini-1.5-flash",
+   const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+   const result = await model.generateContent({
       contents: contents,
       config: {
         systemInstruction: "You are Qonnect AI, a helpful field operations assistant.",

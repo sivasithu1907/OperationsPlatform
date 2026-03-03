@@ -37,10 +37,10 @@ function App() {
   // --- Global State ---
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   
-  // Data State
-  const [tickets, setTickets] = useState<Ticket[]>(MOCK_TICKETS);
-  const [activities, setActivities] = useState<Activity[]>(MOCK_ACTIVITIES);
-  const [technicians, setTechnicians] = useState<Technician[]>(MOCK_TECHNICIANS);
+// Data State
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [activities, setActivities] = useState<Activity[]>([]);
+  const [technicians, setTechnicians] = useState<Technician[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [teams, setTeams] = useState<Team[]>(MOCK_TEAMS);
   const [sites, setSites] = useState<Site[]>(MOCK_SITES);
@@ -220,7 +220,27 @@ function App() {
   const handleDeleteActivity = (id: string) => {
       setActivities(prev => prev.filter(a => a.id !== id));
   };
+  
+const loadTickets = async () => {
+    try {
+      const res = await fetch("/api/tickets");
+      const data = await res.json();
+      if (Array.isArray(data)) setTickets(data);
+    } catch (e) {
+      console.error("Failed to load tickets", e);
+    }
+  };
 
+  const loadActivities = async () => {
+    try {
+      const res = await fetch("/api/activities");
+      const data = await res.json();
+      if (Array.isArray(data)) setActivities(data);
+    } catch (e) {
+      console.error("Failed to load activities", e);
+    }
+  };
+  
 // Customer Handlers (API-first)
 const handleAddCustomer = async (c: Customer) => {
   try {

@@ -1,3 +1,5 @@
+dotenv.config();
+const app = express();
 
 import express from 'express';
 import cors from 'cors';
@@ -53,9 +55,6 @@ async function initDb() {
     console.error("❌ DB initialization failed:", err);
   }
 }
-
-dotenv.config();
-const app = express();
 
 // Middleware
 app.use(express.json({ limit: '10mb' })); 
@@ -251,7 +250,7 @@ app.post('/api/analyze', async (req, res) => {
     const context = history.length > 0 ? `Conversation History:\n${history.join('\n')}\n\n` : '';
     
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-1.5-flash",
       contents: [
         {
           role: "user",
@@ -358,7 +357,7 @@ app.post('/api/chat', async (req, res) => {
     });
 
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-1.5-flash",
       contents: contents,
       config: {
         systemInstruction: "You are Qonnect AI, a helpful field operations assistant.",

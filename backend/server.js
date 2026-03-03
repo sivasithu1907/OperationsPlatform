@@ -46,11 +46,11 @@ async function initDb() {
     `);
 
     // 3. Customer ID Sequence
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS customer_id_seq (
-        id BIGSERIAL PRIMARY KEY
-    `);
-
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS customer_id_seq (
+      id BIGSERIAL PRIMARY KEY
+    );
+  `);
     console.log("✅ DB initialized with Tickets and Customers");
   } catch (err) {
     console.error("❌ DB initialization failed:", err);

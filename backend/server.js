@@ -451,6 +451,12 @@ app.put("/api/tickets/:id/assign", async (req, res) => {
 
     const fromStatus = current.rows[0].status;
 
+// If status is unchanged, do not create duplicate history rows
+if (fromStatus === nextStatus) {
+  const same = await pool.query(`SELECT * FROM tickets WHERE id=$1`, [id]);
+  return res.json(same.rows[0]);
+}
+
     // Update ticket assignment + status
     const updated = await pool.query(
       `
@@ -517,6 +523,17 @@ app.put("/api/tickets/:id/status", async (req, res) => {
     if (!current.rows[0]) return res.status(404).json({ error: "Ticket not found" });
 
     const fromStatus = current.rows[0].status;
+
+      // If status is same, do nothing (avoid duplicate history)
+      if (String(fromStatus).toUpperCase() === String(nextStatus).toUpperCase()) {
+        return res.json({
+          ok: true,
+          skipped: true,
+          reason: "Status unchanged",
+          id,
+          status: fromStatus,
+        });
+      }
 
     // Update
     const updated = await pool.query(

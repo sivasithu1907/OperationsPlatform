@@ -402,11 +402,19 @@ const OperationsDashboard: React.FC<OperationsDashboardProps> = ({
                         const capacity = 8;
                         const utilization = Math.min(100, Math.round((workload/capacity)*100));
                         
-                        // Find Associates for this lead based on Team structure
-                        const team = teams.find(t => t.leadId === tech.id);
-                        const associates = team?.memberIds
+                        // Dynamically find Associates assigned to this Lead's jobs today
+                        const todayActs = activities.filter(a => 
+                            a.leadTechId === tech.id && 
+                            new Date(a.plannedDate).toDateString() === new Date().toDateString() &&
+                            a.status !== 'CANCELLED'
+                        );
+                        
+                        // Extract unique associate IDs from all of today's jobs
+                        const uniqueAssocIds = Array.from(new Set(todayActs.flatMap(a => a.assistantTechIds || [])));
+                        
+                        const associates = uniqueAssocIds
                             .map(mId => technicians.find(t => t.id === mId))
-                            .filter(Boolean) || [];
+                            .filter(Boolean);
 
                         return (
                             <div key={tech.id} className="h-24 border-b border-slate-200 p-3 flex flex-col justify-center">

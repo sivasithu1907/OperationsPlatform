@@ -1,7 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
-  APP_NAME, NAVIGATION_ITEMS, MOCK_TICKETS, MOCK_TECHNICIANS, 
-  MOCK_ACTIVITIES, MOCK_TEAMS, MOCK_SITES, MOCK_CUSTOMERS 
+  APP_NAME, NAVIGATION_ITEMS
 } from './constants';
 import { 
   User, Role, Ticket, Technician, Activity, Team, Site, 
@@ -42,8 +41,8 @@ function App() {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [technicians, setTechnicians] = useState<Technician[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [teams, setTeams] = useState<Team[]>(MOCK_TEAMS);
-  const [sites, setSites] = useState<Site[]>(MOCK_SITES);
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [sites, setSites] = useState<Site[]>([]);
 
   // UI State - Persistent Sidebar
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -243,25 +242,37 @@ const handleLogin = async (email: string, pass: string) => {
       }));
   };
 
-  // Activity Handlers
-  const handleAddActivity = (act: any) => {
+  // Activity Handlers (API-Connected)
+  const handleAddActivity = async (act: any) => {
       const newId = generateActivityId();
-      const newAct = {
-          ...act,
-          id: newId,
-          reference: newId, // Activity ID matches Ref for display
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-      };
-      setActivities(prev => [...prev, newAct]);
+      const payload = { ...act, id: newId, reference: newId, status: act.status || 'PLANNED' };
+      try {
+          const res = await fetch("/api/activities", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload)
+          });
+          if (res.ok) await loadActivities(); // Refresh from DB
+      } catch (e) { console.error("Failed to add activity", e); }
   };
 
-  const handleUpdateActivity = (updated: Activity) => {
-      setActivities(prev => prev.map(a => a.id === updated.id ? updated : a));
+  const handleUpdateActivity = async (updated: Activity) => {
+      try {
+          const res = await fetch(`/api/activities/${updated.id}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(updated)
+          });
+          if (res.ok) await loadActivities(); // Refresh from DB
+      } catch (e) { console.error("Failed to update activity", e); }
   };
 
-  const handleDeleteActivity = (id: string) => {
-      setActivities(prev => prev.filter(a => a.id !== id));
+  const handleDeleteActivity = async (id: string) => {
+      if (!window.confirm("Are you sure you want to delete this activity?")) return;
+      try {
+          const res = await fetch(`/api/activities/${id}`, { method: "DELETE" });
+          if (res.ok) await loadActivities(); // Refresh from DB
+      } catch (e) { console.error("Failed to delete activity", e); }
   };
   
 const loadTickets = async () => {
@@ -282,6 +293,22 @@ const loadTickets = async () => {
     } catch (e) {
       console.error("Failed to load activities", e);
     }
+  };
+
+  const loadTeams = async () => {
+    try {
+      const res = await fetch("/api/teams");
+      const data = await res.json();
+      if (Array.isArray(data)) setTeams(data);
+    } catch (e) { console.error("Failed to load teams", e); }
+  };
+
+  const loadSites = async () => {
+    try {
+      const res = await fetch("/api/sites");
+      const data = await res.json();
+      if (Array.isArray(data)) setSites(data);
+    } catch (e) { console.error("Failed to load sites", e); }
   };
   
 // Customer Handlers (API-first)
@@ -417,6 +444,8 @@ useEffect(() => {
     loadCustomers();
     loadTickets();
     loadActivities();
+    loadTeams(); // <-- NEW
+    loadSites(); // <-- NEW
   }, []);
   
   // --- Navigation Logic ---

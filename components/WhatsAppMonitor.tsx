@@ -338,33 +338,7 @@ const WhatsAppMonitor: React.FC = () => {
                     </div>
                 </div>
 
-                <div className="mt-auto border-t border-slate-100 pt-4">
-                    <h4 className="text-xs font-bold text-slate-400 uppercase mb-3">Gateway Config</h4>
-                    <div className="space-y-3 text-xs">
-                        <div>
-                            <span className="block text-slate-500 mb-1">Webhook URL</span>
-                            <div className="bg-slate-100 p-2 rounded border border-slate-200 font-mono text-slate-600 break-all">
-                                https://api.qonnect.qa/v1/webhook
-                            </div>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                            <div>
-                                <span className="block text-slate-500 mb-1">Phone ID</span>
-                                <div className="bg-slate-100 p-2 rounded border border-slate-200 font-mono text-slate-600">
-                                    109384722
-                                </div>
-                            </div>
-                            <div>
-                                <span className="block text-slate-500 mb-1">Version</span>
-                                <div className="bg-slate-100 p-2 rounded border border-slate-200 font-mono text-slate-600">
-                                    v17.0
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-            </div>
+              </div>
 
             {/* Right Panel (Tabs) */}
             <div className="lg:col-span-2 min-h-0 flex flex-col gap-4">

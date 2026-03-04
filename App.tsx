@@ -120,10 +120,28 @@ function App() {
       });
   };
 
-  // Notifications (Mock)
+  // Live Notifications Logic
   const activeUserNotifications = useMemo(() => {
-      // Simple mock: count unread tickets for lead, or just return empty array
-      return [];
+      if (!currentUser) return [];
+      
+      const notifications: any[] = [];
+      
+      if (currentUser.role === 'ADMIN' || currentUser.role === 'TEAM_LEAD') {
+          // Notify Admins of NEW unassigned tickets
+          const newUnassigned = tickets.filter(t => t.status === TicketStatus.NEW && !t.assignedTechId);
+          if (newUnassigned.length > 0) {
+              notifications.push({ id: 'n1', message: `You have ${newUnassigned.length} new unassigned tickets.` });
+          }
+      } 
+      else if (currentUser.role === 'FIELD_ENGINEER') {
+          // Notify Engineers of tickets recently assigned to them that they haven't started
+          const myNewJobs = tickets.filter(t => t.assignedTechId === currentUser.techId && (t.status === TicketStatus.OPEN || t.status === TicketStatus.ASSIGNED));
+          if (myNewJobs.length > 0) {
+              notifications.push({ id: 'n2', message: `You have ${myNewJobs.length} new assigned jobs.` });
+          }
+      }
+
+      return notifications;
   }, [tickets, currentUser]);
 
   // --- Auth Handlers ---

@@ -196,6 +196,61 @@ app.delete("/api/tickets/:id", async (req, res) => {
   }
 });
 
+// 4. Update Ticket Status & Trigger Review Message
+app.put("/api/tickets/:id/status", async (req, res) => {
+    try {
+        const { status } = req.body;
+        const ticketId = req.params.id;
+
+        // 1. Update the database
+        await pool.query(
+            "UPDATE tickets SET status = $1, updated_at = NOW() WHERE id = $2",
+            [status, ticketId]
+        );
+
+        // 2. If the ticket is marked RESOLVED, send the automated review message
+        if (status === 'RESOLVED') {
+            // Get the customer's phone number
+            const ticketData = await pool.query(`
+                SELECT c.phone, c.name 
+                FROM tickets t 
+                JOIN customers c ON t.customer_id = c.id 
+                WHERE t.id = $1
+            `, [ticketId]);
+
+            if (ticketData.rows.length > 0) {
+                const customer = ticketData.rows[0];
+                const reviewText = `Hi ${customer.name}, your Qonnect service request has been marked as resolved! We hope you are happy with our service. If you have a moment, please let us know how we did or reply here if you need further assistance.`;
+                
+                // IMPORTANT: We will replace 'YOUR_META_TOKEN' and 'YOUR_PHONE_ID' when we connect to Meta
+                try {
+                    await fetch(`https://graph.facebook.com/v17.0/YOUR_PHONE_ID/messages`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer YOUR_META_TOKEN`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            messaging_product: "whatsapp",
+                            to: customer.phone,
+                            type: "text",
+                            text: { body: reviewText }
+                        })
+                    });
+                    console.log(`✅ Review request sent to ${customer.name}`);
+                } catch (metaErr) {
+                    console.error("Failed to send Meta message:", metaErr);
+                }
+            }
+        }
+
+        res.json({ ok: true });
+    } catch (e) { 
+        console.error(e); 
+        res.status(500).json({ error: "Failed to update status" }); 
+    }
+});
+
 // ==============================
 // Customers (PostgreSQL)
 // ==============================

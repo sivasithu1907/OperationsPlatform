@@ -368,6 +368,16 @@ const loadCustomers = async () => {
   }
 };
 
+const loadUsers = async () => {
+  try {
+    const res = await fetch("/api/users");
+    const data = await res.json();
+    if (Array.isArray(data)) setTechnicians(data);
+  } catch (e) {
+    console.error("Failed to load users", e);
+  }
+};
+
 useEffect(() => {
     loadUsers();
     loadCustomers();

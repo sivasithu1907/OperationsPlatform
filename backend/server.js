@@ -66,7 +66,52 @@ async function initDb() {
         created_at TIMESTAMPTZ DEFAULT now()
       );
     `);
+// 5. Teams Table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS teams (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        lead_id TEXT,
+        member_ids JSONB DEFAULT '[]',
+        status TEXT DEFAULT 'AVAILABLE',
+        current_site_id TEXT,
+        workload_level TEXT DEFAULT 'LOW'
+      );
+    `);
 
+    // 6. Sites Table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sites (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        client_name TEXT,
+        location TEXT,
+        priority TEXT,
+        status TEXT DEFAULT 'PLANNED',
+        assigned_team_id TEXT
+      );
+    `);
+
+    // 7. Activities Table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS activities (
+        id TEXT PRIMARY KEY,
+        reference TEXT,
+        type TEXT,
+        priority TEXT,
+        status TEXT DEFAULT 'PLANNED',
+        planned_date TIMESTAMPTZ,
+        customer_id TEXT,
+        site_id TEXT,
+        lead_tech_id TEXT,
+        description TEXT,
+        duration_hours NUMERIC,
+        details JSONB DEFAULT '{}',
+        created_at TIMESTAMPTZ DEFAULT now(),
+        updated_at TIMESTAMPTZ DEFAULT now()
+      );
+    `);
+    
 // Create a default admin if none exists
     const adminCheck = await pool.query("SELECT * FROM users WHERE email = 'admin@qonnect.qa'");
     if (adminCheck.rows.length === 0) {
@@ -455,6 +500,79 @@ app.get("/api/users", async (req, res) => {
     } catch (e) {
         res.status(500).json({ error: "Failed to fetch users" });
     }
+});
+
+// ==============================
+// Operations & Planning (Teams, Sites, Activities)
+// ==============================
+
+// GET Teams
+app.get("/api/teams", async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT * FROM teams");
+    res.json(rows.map(r => ({
+        id: r.id, name: r.name, leadId: r.lead_id, memberIds: r.member_ids,
+        status: r.status, currentSiteId: r.current_site_id, workloadLevel: r.workload_level
+    })));
+  } catch (e) { res.status(500).json({error: "Failed to load teams"}); }
+});
+
+// GET Sites
+app.get("/api/sites", async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT * FROM sites");
+    res.json(rows.map(r => ({
+        id: r.id, name: r.name, clientName: r.client_name, location: r.location,
+        priority: r.priority, status: r.status, assignedTeamId: r.assigned_team_id
+    })));
+  } catch (e) { res.status(500).json({error: "Failed to load sites"}); }
+});
+
+// GET Activities
+app.get("/api/activities", async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT * FROM activities ORDER BY created_at DESC");
+    res.json(rows.map(r => ({
+        id: r.id, reference: r.reference, type: r.type, priority: r.priority,
+        status: r.status, plannedDate: r.planned_date, customerId: r.customer_id,
+        siteId: r.site_id, leadTechId: r.lead_tech_id, description: r.description,
+        durationHours: Number(r.duration_hours), ...r.details,
+        createdAt: r.created_at, updatedAt: r.updated_at
+    })));
+  } catch (e) { res.status(500).json({error: "Failed to load activities"}); }
+});
+
+// POST Activity (Create)
+app.post("/api/activities", async (req, res) => {
+    try {
+        const { id, reference, type, priority, status, plannedDate, customerId, siteId, leadTechId, description, durationHours, ...details } = req.body;
+        await pool.query(
+            `INSERT INTO activities (id, reference, type, priority, status, planned_date, customer_id, site_id, lead_tech_id, description, duration_hours, details)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+            [id, reference, type, priority, status, plannedDate, customerId, siteId, leadTechId, description, durationHours, JSON.stringify(details)]
+        );
+        res.status(201).json({ok: true});
+    } catch(e) { console.error(e); res.status(500).json({error: "Failed to create activity"}); }
+});
+
+// PUT Activity (Update)
+app.put("/api/activities/:id", async (req, res) => {
+    try {
+        const { type, priority, status, plannedDate, customerId, siteId, leadTechId, description, durationHours, ...details } = req.body;
+        await pool.query(
+            `UPDATE activities SET type=$1, priority=$2, status=$3, planned_date=$4, customer_id=$5, site_id=$6, lead_tech_id=$7, description=$8, duration_hours=$9, details=$10, updated_at=NOW() WHERE id=$11`,
+            [type, priority, status, plannedDate, customerId, siteId, leadTechId, description, durationHours, JSON.stringify(details), req.params.id]
+        );
+        res.json({ok: true});
+    } catch(e) { console.error(e); res.status(500).json({error: "Failed to update activity"}); }
+});
+
+// DELETE Activity
+app.delete("/api/activities/:id", async (req, res) => {
+    try {
+        await pool.query("DELETE FROM activities WHERE id=$1", [req.params.id]);
+        res.json({ok: true});
+    } catch(e) { res.status(500).json({error: "Failed to delete activity"}); }
 });
 
 // ==============================

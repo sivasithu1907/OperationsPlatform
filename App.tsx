@@ -884,8 +884,17 @@ useEffect(() => {
                 {activeView === 'guide' && <IntegrationGuide />}
             </div>
 
-            {/* AI Assistant Chat Bubble (Global) */}
-            <AIChatBot />
+          {/* AI Assistant Chat Bubble (Global) */}
+          <AIChatBot 
+            context={{
+              tickets,
+              activities,
+              customers,
+              technicians,
+              sites
+            }}
+            currentUser={currentUser}
+          />
 
         </main>
     </div>

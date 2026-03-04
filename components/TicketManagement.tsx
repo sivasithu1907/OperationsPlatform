@@ -830,7 +830,7 @@ const TicketManagement: React.FC<TicketManagementProps> = ({
                
                {/* NEW WRAPPER DIV FOR BOTH BUTTONS */}
                <div className="flex items-center gap-2">
-                  {currentUser?.role === 'OPERATIONS_MANAGER' && (
+                  {currentUser?.role === 'ADMIN' && (
                        <button 
                            onClick={() => {
                                if (onDeleteTicket && selectedTicketId) {

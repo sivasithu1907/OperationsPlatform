@@ -55,6 +55,7 @@ function App() {
   });
 
   const [activeView, setActiveView] = useState('dashboard');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [ticketFilter, setTicketFilter] = useState<TicketFilter | null>(null);
   const [focusedTicketId, setFocusedTicketId] = useState<string | null>(null);
   const [targetActivityId, setTargetActivityId] = useState<string | null>(null);
@@ -426,8 +427,16 @@ useEffect(() => {
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
         
+        {/* Mobile Overlay */}
+        {isMobileMenuOpen && (
+            <div 
+                className="fixed inset-0 bg-slate-900/50 z-40 md:hidden backdrop-blur-sm"
+                onClick={() => setIsMobileMenuOpen(false)}
+            />
+        )}
+
         {/* Sidebar - APPLE iOS LIGHT THEME */}
-        <aside className={`hidden md:flex flex-col bg-[#E5E7EB] border-r-[3px] border-[#1E293B]/20 text-gray-900 z-20 transition-all duration-300 ease-in-out ${sidebarCollapsed ? 'w-[80px]' : 'w-[260px]'}`}>
+        <aside className={`fixed inset-y-0 left-0 md:relative flex flex-col bg-[#E5E7EB] border-r-[3px] border-[#1E293B]/20 text-gray-900 z-50 transition-transform duration-300 ease-in-out md:translate-x-0 ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} ${sidebarCollapsed ? 'md:w-[80px] w-[80px]' : 'md:w-[260px] w-[260px]'}`}>
             
             {/* Sidebar Header */}
             <div className={`flex items-center border-b border-[#0F172A]/[0.08] transition-all duration-300 ${sidebarCollapsed ? 'justify-center py-5' : 'px-5 py-5 gap-3'}`}>
@@ -469,6 +478,7 @@ useEffect(() => {
                                         title={sidebarCollapsed ? item.label : ''}
                                         onClick={() => {
                                             setActiveView(item.id);
+                                            setIsMobileMenuOpen(false); // <--- Auto-close on mobile
                                             if (item.id !== 'tickets') setTicketFilter(null); 
                                             if (item.id !== 'lead_portal') setFocusedTicketId(null);
                                             if (item.id !== 'planning') setTargetActivityId(null);
@@ -520,10 +530,19 @@ useEffect(() => {
             {/* Top Bar */}
             <header className="h-16 border-b border-slate-100 bg-white flex items-center justify-between px-4 shrink-0 z-20 relative">
                 <div className="flex items-center gap-3">
+                    {/* Desktop Toggle (Minimizes Sidebar) */}
                     <button 
                         onClick={toggleSidebar}
-                        className="p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-800 rounded-lg transition-colors cursor-pointer"
+                        className="hidden md:block p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-800 rounded-lg transition-colors cursor-pointer"
                         title={sidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+                    >
+                        <Menu size={24} />
+                    </button>
+                    {/* Mobile Toggle (Slides Sidebar Out) */}
+                    <button 
+                        onClick={() => setIsMobileMenuOpen(true)}
+                        className="md:hidden p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-800 rounded-lg transition-colors cursor-pointer"
+                        title="Open Menu"
                     >
                         <Menu size={24} />
                     </button>

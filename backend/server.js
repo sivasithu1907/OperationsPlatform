@@ -661,12 +661,12 @@ app.get("/api/whatsapp/logs", async (req, res) => {
 });
 
 app.get("/api/whatsapp/webhook", (req, res) => {
-    // Meta/WhatsApp Verification
     const mode = req.query["hub.mode"];
     const token = req.query["hub.verify_token"];
     const challenge = req.query["hub.challenge"];
 
-    if (mode === "subscribe" && token === "QONNECT_WA_TOKEN") {
+    // Use the variable from your .env file
+    if (mode === "subscribe" && token === process.env.WA_VERIFY_TOKEN) {
         res.status(200).send(challenge);
     } else {
         res.sendStatus(403);

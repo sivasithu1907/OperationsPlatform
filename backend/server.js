@@ -237,10 +237,10 @@ app.put("/api/tickets/:id/status", async (req, res) => {
                 
                 // IMPORTANT: We will replace 'YOUR_META_TOKEN' and 'YOUR_PHONE_ID' when we connect to Meta
                 try {
-                    await fetch(`https://graph.facebook.com/v17.0/YOUR_PHONE_ID/messages`, {
+                    await fetch(`https://graph.facebook.com/v17.0/${process.env.WA_PHONE_NUMBER_ID}/messages`, {
                         method: 'POST',
                         headers: {
-                            'Authorization': `Bearer YOUR_META_TOKEN`,
+                            'Authorization': `Bearer ${process.env.WA_ACCESS_TOKEN}`,
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({

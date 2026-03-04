@@ -601,34 +601,63 @@ app.post("/api/whatsapp/webhook", async (req, res) => {
                 for (let change of entry.changes) {
                     if (change.value && change.value.messages) {
                         const msg = change.value.messages[0];
+                        const contact = change.value.contacts?.[0];
+                        
                         const phone = msg.from; // Sender's phone number
-                        const text = msg.text.body;
+                        const name = contact?.profile?.name || "Unknown WhatsApp User";
+                        const text = msg.text?.body || "Media message received";
 
-                        console.log(`[WhatsApp] New message from ${phone}: ${text}`);
+                        console.log(`[WhatsApp] New message from ${name} (${phone}): ${text}`);
 
-                        // Find if an active ticket exists for this phone
-                        const { rows: tickets } = await pool.query(
-                            "SELECT * FROM tickets WHERE messages::text LIKE $1 AND status != 'RESOLVED' ORDER BY updated_at DESC LIMIT 1",
-                            [`%${phone}%`]
-                        );
+                        // 1. FIND OR CREATE CUSTOMER (Only 1 per phone number forever)
+                        let customerRes = await pool.query("SELECT * FROM customers WHERE phone_number = $1", [phone]);
+                        let customerId;
+                        
+                        if (customerRes.rows.length === 0) {
+                            customerId = `c-${Date.now()}`;
+                            await pool.query(
+                                "INSERT INTO customers (id, name, phone_number, created_at) VALUES ($1, $2, $3, NOW())",
+                                [customerId, name, phone]
+                            );
+                            console.log(`✅ New Customer Created: ${name}`);
+                        } else {
+                            customerId = customerRes.rows[0].id;
+                        }
 
-                        if (tickets.length > 0) {
-                            // Append message to existing ticket
-                            const ticket = tickets[0];
-                            const messages = ticket.messages || [];
-                            messages.push({
-                                id: `wa-${Date.now()}`,
-                                sender: "CLIENT",
-                                content: text,
-                                timestamp: new Date().toISOString()
-                            });
+                        // 2. FIND ACTIVE OR RECENT TICKET (Within 7 days)
+                        let ticketRes = await pool.query(`
+                            SELECT * FROM tickets 
+                            WHERE customer_id = $1 
+                            AND (status NOT IN ('RESOLVED', 'CLOSED') OR updated_at > NOW() - INTERVAL '7 days')
+                            ORDER BY updated_at DESC LIMIT 1
+                        `, [customerId]);
 
+                        const newMessageObj = {
+                            id: `wa-${Date.now()}`,
+                            sender: 'CLIENT',
+                            content: text,
+                            timestamp: new Date().toISOString()
+                        };
+
+                        if (ticketRes.rows.length > 0) {
+                            // APPEND TO EXISTING TICKET
+                            const existingTicket = ticketRes.rows[0];
+                            const updatedMessages = [...(existingTicket.messages || []), newMessageObj];
+                            
                             await pool.query(
                                 "UPDATE tickets SET messages = $1, updated_at = NOW() WHERE id = $2",
-                                [JSON.stringify(messages), ticket.id]
+                                [JSON.stringify(updatedMessages), existingTicket.id]
                             );
+                            console.log(`✅ Message appended to existing ticket: ${existingTicket.id}`);
                         } else {
-                            console.log(`[WhatsApp] No active ticket found for ${phone}.`);
+                            // CREATE NEW TICKET
+                            const ticketId = `t-${Date.now()}`;
+                            await pool.query(
+                                `INSERT INTO tickets (id, customer_id, title, status, priority, source, messages, created_at, updated_at) 
+                                 VALUES ($1, $2, $3, 'NEW', 'MEDIUM', 'WHATSAPP', $4, NOW(), NOW())`,
+                                [ticketId, customerId, `WhatsApp Inquiry from ${name}`, JSON.stringify([newMessageObj])]
+                            );
+                            console.log(`✅ New ticket created: ${ticketId}`);
                         }
                     }
                 }

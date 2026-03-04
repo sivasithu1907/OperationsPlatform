@@ -126,21 +126,36 @@ function App() {
   }, [tickets, currentUser]);
 
   // --- Auth Handlers ---
-  const handleLogin = (email: string, pass: string) => {
-      // Simple mock login
-      const tech = technicians.find(t => t.email === email); // In real app, check password too
-      if (tech) {
-          setCurrentUser({
-              email: tech.email,
-              name: tech.name,
-              role: tech.systemRole,
-              techId: tech.id
+const handleLogin = async (email: string, pass: string) => {
+      try {
+          const res = await fetch("/api/login", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ email, password: pass })
           });
-          // Set default view based on role
-          if (tech.systemRole === Role.FIELD_ENGINEER) setActiveView('tech_portal');
+          
+          if (!res.ok) {
+              alert('Invalid credentials');
+              return;
+          }
+
+          const data = await res.json();
+          // Store token securely
+          localStorage.setItem('qonnect_token', data.token);
+          
+          setCurrentUser({
+              email: data.user.email,
+              name: data.user.name,
+              role: data.user.role,
+              techId: data.user.id
+          });
+          
+          if (data.user.role === Role.FIELD_ENGINEER) setActiveView('tech_portal');
           else setActiveView('dashboard');
-      } else {
-          alert('Invalid credentials');
+
+      } catch (error) {
+          console.error("Login Error:", error);
+          alert("Failed to connect to server.");
       }
   };
 
@@ -354,6 +369,7 @@ const loadCustomers = async () => {
 };
 
 useEffect(() => {
+    loadUsers();
     loadCustomers();
     loadTickets();
     loadActivities();

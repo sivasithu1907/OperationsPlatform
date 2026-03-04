@@ -112,6 +112,19 @@ async function initDb() {
       );
     `);
     
+// 8. WhatsApp Logs Table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS whatsapp_logs (
+        id TEXT PRIMARY KEY,
+        timestamp TIMESTAMPTZ DEFAULT now(),
+        type TEXT,
+        phone TEXT,
+        status TEXT,
+        payload_summary TEXT,
+        latency INTEGER
+      );
+    `);
+    
 // Create a default admin if none exists
     const adminCheck = await pool.query("SELECT * FROM users WHERE email = 'admin@qonnect.qa'");
     if (adminCheck.rows.length === 0) {
@@ -631,15 +644,25 @@ app.delete("/api/activities/:id", async (req, res) => {
 });
 
 // ==============================
-// WhatsApp Webhook Integration
+// WhatsApp Webhook & Logs Integration
 // ==============================
+
+// GET WhatsApp Logs for the Monitor
+app.get("/api/whatsapp/logs", async (req, res) => {
+    try {
+        const { rows } = await pool.query("SELECT * FROM whatsapp_logs ORDER BY timestamp DESC LIMIT 200");
+        res.json(rows);
+    } catch (e) {
+        res.status(500).json({ error: "Failed to fetch logs" });
+    }
+});
+
 app.get("/api/whatsapp/webhook", (req, res) => {
     // Meta/WhatsApp Verification
     const mode = req.query["hub.mode"];
     const token = req.query["hub.verify_token"];
     const challenge = req.query["hub.challenge"];
 
-    // The verify token here must match the one you set in Meta Developer Dashboard
     if (mode === "subscribe" && token === "QONNECT_WA_TOKEN") {
         res.status(200).send(challenge);
     } else {
@@ -648,38 +671,36 @@ app.get("/api/whatsapp/webhook", (req, res) => {
 });
 
 app.post("/api/whatsapp/webhook", async (req, res) => {
+    const startTime = Date.now(); // Track latency for the monitor
     try {
         const body = req.body;
-        // Verify this is from WhatsApp API
         if (body.object === "whatsapp_business_account") {
             for (let entry of body.entry) {
                 for (let change of entry.changes) {
+                    
+                    // 1. HANDLE INBOUND MESSAGES
                     if (change.value && change.value.messages) {
                         const msg = change.value.messages[0];
                         const contact = change.value.contacts?.[0];
                         
-                        const phone = msg.from; // Sender's phone number
+                        const phone = msg.from;
                         const name = contact?.profile?.name || "Unknown WhatsApp User";
                         const text = msg.text?.body || "Media message received";
 
-                        console.log(`[WhatsApp] New message from ${name} (${phone}): ${text}`);
-
-                        // 1. FIND OR CREATE CUSTOMER (Only 1 per phone number forever)
-                        let customerRes = await pool.query("SELECT * FROM customers WHERE phone_number = $1", [phone]);
+                        // FIND OR CREATE CUSTOMER
+                        let customerRes = await pool.query("SELECT * FROM customers WHERE phone = $1", [phone]);
                         let customerId;
-                        
                         if (customerRes.rows.length === 0) {
                             customerId = `c-${Date.now()}`;
                             await pool.query(
-                                "INSERT INTO customers (id, name, phone_number, created_at) VALUES ($1, $2, $3, NOW())",
+                                "INSERT INTO customers (id, name, phone, created_at) VALUES ($1, $2, $3, NOW())",
                                 [customerId, name, phone]
                             );
-                            console.log(`✅ New Customer Created: ${name}`);
                         } else {
                             customerId = customerRes.rows[0].id;
                         }
 
-                        // 2. FIND ACTIVE OR RECENT TICKET (Within 7 days)
+                        // FIND OR CREATE TICKET
                         let ticketRes = await pool.query(`
                             SELECT * FROM tickets 
                             WHERE customer_id = $1 
@@ -695,31 +716,48 @@ app.post("/api/whatsapp/webhook", async (req, res) => {
                         };
 
                         if (ticketRes.rows.length > 0) {
-                            // APPEND TO EXISTING TICKET
                             const existingTicket = ticketRes.rows[0];
                             const updatedMessages = [...(existingTicket.messages || []), newMessageObj];
-                            
                             await pool.query(
                                 "UPDATE tickets SET messages = $1, updated_at = NOW() WHERE id = $2",
                                 [JSON.stringify(updatedMessages), existingTicket.id]
                             );
-                            console.log(`✅ Message appended to existing ticket: ${existingTicket.id}`);
                         } else {
-                            // CREATE NEW TICKET
                             const ticketId = `t-${Date.now()}`;
+                            // Note: We use "title" as a placeholder here, though your schema doesn't strictly require it. 
+                            // We will insert the message json safely.
                             await pool.query(
-                                `INSERT INTO tickets (id, customer_id, title, status, priority, source, messages, created_at, updated_at) 
-                                 VALUES ($1, $2, $3, 'NEW', 'MEDIUM', 'WHATSAPP', $4, NOW(), NOW())`,
-                                [ticketId, customerId, `WhatsApp Inquiry from ${name}`, JSON.stringify([newMessageObj])]
+                                `INSERT INTO tickets (id, customer_id, customer_name, category, priority, status, messages, created_at, updated_at) 
+                                 VALUES ($1, $2, $3, 'SUPPORT', 'MEDIUM', 'NEW', $4, NOW(), NOW())`,
+                                [ticketId, customerId, name, JSON.stringify([newMessageObj])]
                             );
-                            console.log(`✅ New ticket created: ${ticketId}`);
                         }
+
+                        // LOG INBOUND TO MONITOR
+                        await pool.query(
+                            `INSERT INTO whatsapp_logs (id, type, phone, status, payload_summary, latency) VALUES ($1, $2, $3, $4, $5, $6)`,
+                            [`log-msg-${Date.now()}`, 'INBOUND', phone, 'RECEIVED', `type: "text", size: "${text.length}b"`, Date.now() - startTime]
+                        );
+                    }
+
+                    // 2. HANDLE OUTBOUND STATUSES (Sent, Delivered, Read)
+                    if (change.value && change.value.statuses) {
+                        const statusObj = change.value.statuses[0];
+                        await pool.query(
+                            `INSERT INTO whatsapp_logs (id, type, phone, status, payload_summary, latency) VALUES ($1, $2, $3, $4, $5, $6)`,
+                            [`log-stat-${Date.now()}`, 'OUTBOUND', statusObj.recipient_id, statusObj.status.toUpperCase(), `Status update: ${statusObj.status}`, Date.now() - startTime]
+                        );
                     }
                 }
             }
         }
         res.sendStatus(200);
     } catch (error) {
+        // LOG ERRORS TO MONITOR
+        await pool.query(
+            `INSERT INTO whatsapp_logs (id, type, phone, status, payload_summary, latency) VALUES ($1, 'SYSTEM', 'SYSTEM', 'ERROR', $2, 0)`,
+            [`log-err-${Date.now()}`, error.message.substring(0, 50)]
+        );
         console.error("[WhatsApp Webhook Error]:", error);
         res.sendStatus(500);
     }

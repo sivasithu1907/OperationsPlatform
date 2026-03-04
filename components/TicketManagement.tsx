@@ -5,7 +5,7 @@ import { TICKET_CATEGORIES, SEARCH_INPUT_STYLES, INPUT_STYLES } from '../constan
 import { analyzeTicketMessage } from '../services/geminiService';
 import CustomerSelector from './CustomerSelector';
 import { validatePhone, normalizePhone, formatPhoneDisplay } from '../utils/phoneUtils';
-import { Send, Sparkles, MoreHorizontal, Plus, X, Calendar, Save, AlertCircle, Filter, MapPin, Link as LinkIcon, Home, History, Clock, User, AlertTriangle, Search as SearchIcon, ChevronDown, RefreshCw, UserPlus, CheckCircle2, Unlink, UserCheck, MessageSquare, Wrench, Wifi } from 'lucide-react';
+import { Send, Sparkles, MoreHorizontal, Plus, X, Calendar, Save, AlertCircle, Filter, MapPin, Link as LinkIcon, Home, History, Clock, User, AlertTriangle, Search as SearchIcon, ChevronDown, RefreshCw, UserPlus, CheckCircle2, Unlink, UserCheck, MessageSquare, Wrench, Wifi, Trash2 } from 'lucide-react';
 import { getTicketHealth, getHealthColor } from '../utils/ticketUtils';
 
 interface TicketManagementProps {
@@ -33,6 +33,8 @@ interface TicketManagementProps {
   }) => void;
   activeFilter: TicketFilter | null;
   onClearFilter: () => void;
+  currentUser?: User;
+  onDeleteTicket?: (id: string) => void;
 }
 
 // Date Constants for Dropdowns
@@ -65,7 +67,9 @@ const TicketManagement: React.FC<TicketManagementProps> = ({
     onSendMessage, 
     onCreateTicket,
     activeFilter,
-    onClearFilter
+    onClearFilter,
+    currentUser,
+    onDeleteTicket
 }) => {
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
@@ -823,10 +827,28 @@ const TicketManagement: React.FC<TicketManagementProps> = ({
                    <h3 className="font-bold text-slate-800">{editForm.customerName}</h3>
                    <p className="text-xs text-slate-500">{formatPhoneDisplay(editForm.phoneNumber)}</p>
                </div>
-               <button onClick={handleAIAnalysis} disabled={isAnalyzing} className="text-xs font-semibold flex items-center gap-1 text-purple-600 hover:bg-purple-50 px-2 py-1.5 rounded transition-colors disabled:opacity-50">
-                   {isAnalyzing ? <div className="animate-spin w-3 h-3 border-2 border-purple-600 border-t-transparent rounded-full"/> : <Sparkles size={14} />}
-                   AI Analyze
-               </button>
+               
+               {/* NEW WRAPPER DIV FOR BOTH BUTTONS */}
+               <div className="flex items-center gap-2">
+                  {currentUser?.role === 'OPERATIONS_MANAGER' && (
+                       <button 
+                           onClick={() => {
+                               if (onDeleteTicket && selectedTicketId) {
+                                   onDeleteTicket(selectedTicketId);
+                                   setSelectedTicketId(null); // Clear selection after delete
+                               }
+                           }}
+                           className="text-xs font-semibold flex items-center gap-1 text-red-600 hover:bg-red-50 px-2 py-1.5 rounded transition-colors"
+                       >
+                           <Trash2 size={14} /> Delete
+                       </button>
+                   )}
+
+                   <button onClick={handleAIAnalysis} disabled={isAnalyzing} className="text-xs font-semibold flex items-center gap-1 text-purple-600 hover:bg-purple-50 px-2 py-1.5 rounded transition-colors disabled:opacity-50">
+                       {isAnalyzing ? <div className="animate-spin w-3 h-3 border-2 border-purple-600 border-t-transparent rounded-full"/> : <Sparkles size={14} />}
+                       AI Analyze
+                   </button>
+               </div>
              </div>
              
              <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50">
